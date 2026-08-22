@@ -977,6 +977,13 @@ function insertEditorHtmlAtRange(editor, html, range) {
   insertEditorHtml(editor, html);
 }
 
+function runWithEditorRange(editor, range, callback) {
+  if (range) savedEditorRange = range.cloneRange();
+  restoreEditorSelection(editor);
+  callback();
+  saveEditorSelection(editor);
+}
+
 function editorBlockForNode(node, editor) {
   const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
   return element?.closest?.("p, div, li, blockquote, h1, h2, h3") || editor;
@@ -1002,48 +1009,46 @@ function selectEditorImage(editor, image) {
   saveEditorSelection(editor);
 }
 
-function applyEditorCommand(editor, command) {
-  restoreEditorSelection(editor);
-  document.execCommand(command, false, null);
-  saveEditorSelection(editor);
+function applyEditorCommand(editor, command, range = null) {
+  runWithEditorRange(editor, range, () => document.execCommand(command, false, null));
 }
 
-function applyEditorFontSize(editor, size) {
+function applyEditorFontSize(editor, size, range = null) {
   const safeSize = sanitizeFontSize(size);
   if (!safeSize) return;
-  restoreEditorSelection(editor);
-  const selection = getSelection();
-  if (!selection.rangeCount || selection.isCollapsed) return;
-  const range = selection.getRangeAt(0);
-  const span = document.createElement("span");
-  span.style.fontSize = safeSize;
-  try {
-    range.surroundContents(span);
-  } catch {
-    span.appendChild(range.extractContents());
-    range.insertNode(span);
-  }
-  selection.removeAllRanges();
-  const nextRange = document.createRange();
-  nextRange.selectNodeContents(span);
-  nextRange.collapse(false);
-  selection.addRange(nextRange);
-  saveEditorSelection(editor);
+  runWithEditorRange(editor, range, () => {
+    const selection = getSelection();
+    if (!selection.rangeCount || selection.isCollapsed) return;
+    const activeRange = selection.getRangeAt(0);
+    const span = document.createElement("span");
+    span.style.fontSize = safeSize;
+    try {
+      activeRange.surroundContents(span);
+    } catch {
+      span.appendChild(activeRange.extractContents());
+      activeRange.insertNode(span);
+    }
+    selection.removeAllRanges();
+    const nextRange = document.createRange();
+    nextRange.selectNodeContents(span);
+    nextRange.collapse(false);
+    selection.addRange(nextRange);
+  });
 }
 
-function applyEditorLink(editor, url) {
+function applyEditorLink(editor, url, range = null) {
   const href = normalizeHttpUrl(url);
   if (!href) return;
-  restoreEditorSelection(editor);
-  const selection = getSelection();
-  if (!selection.rangeCount || selection.isCollapsed) return;
-  document.execCommand("createLink", false, href);
-  const anchor = selection.anchorNode?.parentElement?.closest?.("a");
-  if (anchor && editor.contains(anchor)) {
-    anchor.target = "_blank";
-    anchor.rel = "noopener";
-  }
-  saveEditorSelection(editor);
+  runWithEditorRange(editor, range, () => {
+    const selection = getSelection();
+    if (!selection.rangeCount || selection.isCollapsed) return;
+    document.execCommand("createLink", false, href);
+    const anchor = selection.anchorNode?.parentElement?.closest?.("a");
+    if (anchor && editor.contains(anchor)) {
+      anchor.target = "_blank";
+      anchor.rel = "noopener";
+    }
+  });
 }
 
 function applyEditorImageWidth(editor, width) {
@@ -1073,6 +1078,12 @@ function shiftEditorImageWidth(editor, direction) {
   const current = parseInt(image.style.width || "420", 10) || 420;
   image.style.width = sanitizeImageWidth(current + direction * 40);
   saveEditorSelection(editor);
+}
+
+function shiftImageWidth(image, direction) {
+  if (!image) return;
+  const current = parseInt(image.style.width || "420", 10) || 420;
+  image.style.width = sanitizeImageWidth(current + direction * 40);
 }
 
 function editorImageWidthValue(image) {
@@ -1116,6 +1127,8 @@ function showEditorContextMenu(editor, event) {
     const selectedInside = selection.rangeCount && editor.contains(selection.anchorNode) && !selection.isCollapsed;
     if (!selectedInside) selectEditorBlock(editor, event.target);
   }
+  const menuRange = savedEditorRange?.cloneRange() || null;
+  const menuImage = image && editor.contains(image) ? image : null;
   const menu = document.createElement("div");
   menu.className = "editor-context-menu";
   const isImage = !!(image && editor.contains(image));
@@ -1162,28 +1175,27 @@ function showEditorContextMenu(editor, event) {
     const stepButton = clickEvent.target.closest("[data-image-step]");
     const linkButton = clickEvent.target.closest("[data-format-link]");
     if (commandButton) {
-      applyEditorCommand(editor, commandButton.dataset.formatCommand);
+      applyEditorCommand(editor, commandButton.dataset.formatCommand, menuRange);
       updateEditorContextMenuState(editor, menu);
     }
     if (fontApplyButton) {
       const input = menu.querySelector("[data-font-size-input]");
-      applyEditorFontSize(editor, input?.value || "");
+      applyEditorFontSize(editor, input?.value || "", menuRange);
       updateEditorContextMenuState(editor, menu);
     }
     if (linkButton) {
       const href = prompt("输入链接地址");
-      if (href) applyEditorLink(editor, href);
+      if (href) applyEditorLink(editor, href, menuRange);
       updateEditorContextMenuState(editor, menu);
     }
     if (stepButton) {
-      shiftEditorImageWidth(editor, Number(stepButton.dataset.imageStep));
-      const currentImage = editorSelectedImage(editor);
+      shiftImageWidth(menuImage, Number(stepButton.dataset.imageStep));
       const input = menu.querySelector("[data-image-width]");
-      if (input) input.value = editorImageWidthValue(currentImage);
+      if (input) input.value = editorImageWidthValue(menuImage);
     }
   });
   menu.querySelector("[data-image-width]")?.addEventListener("change", (inputEvent) => {
-    applyEditorImageWidth(editor, inputEvent.target.value);
+    if (menuImage) menuImage.style.width = sanitizeImageWidth(inputEvent.target.value);
   });
 }
 
