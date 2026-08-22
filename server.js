@@ -302,7 +302,6 @@ async function searchGasUsers(keyword, db) {
   const query = String(keyword || "").trim();
   if (!query) return [];
   const results = [...cachedGasMatches(db, query)];
-  if (results.length) return results.slice(0, 12);
   const seen = new Set();
   results.forEach((item) => seen.add(String(item.uid)));
   const addUid = async (uid) => {
@@ -315,23 +314,7 @@ async function searchGasUsers(keyword, db) {
   };
 
   if (/^\d+$/.test(query)) await addUid(query);
-
-  const searchUrl = `https://duckduckgo.com/html/?q=${encodeURIComponent(`site:chinadlrs.com/space/ ${query}`)}`;
-  const response = await fetch(searchUrl, {
-    headers: {
-      "User-Agent": "Mozilla/5.0 DLRS-Personas/1.0",
-      "Accept": "text/html,*/*",
-      "Referer": "https://duckduckgo.com/"
-    }
-  }).catch(() => null);
-  const html = response?.ok ? await response.text() : "";
-  const uidMatches = [...html.matchAll(/href="([^"]*chinadlrs\.com\/space\/(\d+)[^"]*)"/gi)];
-  for (const match of uidMatches) {
-    const decoded = decodeDuckDuckGoUrl(match[1]);
-    const uid = decoded.match(/chinadlrs\.com\/space\/(\d+)/i)?.[1] || match[2];
-    await addUid(uid);
-  }
-  return results;
+  return results.slice(0, 12);
 }
 
 function validateDateValue(value) {
