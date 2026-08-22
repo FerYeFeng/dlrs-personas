@@ -157,6 +157,27 @@ function sanitizeImageSize(value = "") {
   return ["small", "medium", "large"].includes(value) ? value : "";
 }
 
+function normalizeHttpUrl(value = "") {
+  const url = String(value).trim();
+  if (/^https?:\/\//i.test(url)) return url;
+  if (/^[\w.-]+\.[a-z]{2,}(\/\S*)?$/i.test(url)) return `https://${url}`;
+  return "";
+}
+
+function linkifyText(text = "") {
+  const pattern = /(https?:\/\/[^\s<]+|[\w.-]+\.[a-z]{2,}(?:\/[^\s<]*)?)/gi;
+  let lastIndex = 0;
+  let html = "";
+  String(text).replace(pattern, (match, _url, offset) => {
+    html += escapeHtml(String(text).slice(lastIndex, offset));
+    const href = normalizeHttpUrl(match);
+    html += href ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener">${escapeHtml(match)}</a>` : escapeHtml(match);
+    lastIndex = offset + match.length;
+    return match;
+  });
+  return html + escapeHtml(String(text).slice(lastIndex));
+}
+
 function sanitizeRichHtml(html = "") {
   const template = document.createElement("template");
   template.innerHTML = String(html);
@@ -207,7 +228,7 @@ function plainTextToHtml(text = "") {
     .split(/\n+/)
     .map((line) => line.trim())
     .filter(Boolean)
-    .map((line) => `<p>${escapeHtml(line)}</p>`)
+    .map((line) => `<p>${linkifyText(line)}</p>`)
     .join("");
 }
 
@@ -999,6 +1020,21 @@ function applyEditorFontSize(editor, size) {
   saveEditorSelection(editor);
 }
 
+function applyEditorLink(editor, url) {
+  const href = normalizeHttpUrl(url);
+  if (!href) return;
+  restoreEditorSelection(editor);
+  const selection = getSelection();
+  if (!selection.rangeCount || selection.isCollapsed) return;
+  document.execCommand("createLink", false, href);
+  const anchor = selection.anchorNode?.parentElement?.closest?.("a");
+  if (anchor && editor.contains(anchor)) {
+    anchor.target = "_blank";
+    anchor.rel = "noopener";
+  }
+  saveEditorSelection(editor);
+}
+
 function applyEditorImageSize(editor, size) {
   const safeSize = sanitizeImageSize(size);
   if (!safeSize) return;
@@ -1066,6 +1102,7 @@ function showEditorContextMenu(editor, event) {
       <button type="button" data-format-command="bold"><i class="material-icons">format_bold</i></button>
       <button type="button" data-format-command="italic"><i class="material-icons">format_italic</i></button>
       <button type="button" data-format-command="underline"><i class="material-icons">format_underlined</i></button>
+      <button type="button" data-format-link><i class="material-icons">link</i></button>
     </div>
     <div class="context-size-grid">
       <button type="button" data-font-size="13px">小</button>
@@ -1085,8 +1122,13 @@ function showEditorContextMenu(editor, event) {
     const commandButton = clickEvent.target.closest("[data-format-command]");
     const sizeButton = clickEvent.target.closest("[data-font-size]");
     const stepButton = clickEvent.target.closest("[data-image-step]");
+    const linkButton = clickEvent.target.closest("[data-format-link]");
     if (commandButton) applyEditorCommand(editor, commandButton.dataset.formatCommand);
     if (sizeButton) applyEditorFontSize(editor, sizeButton.dataset.fontSize);
+    if (linkButton) {
+      const href = prompt("输入链接地址");
+      if (href) applyEditorLink(editor, href);
+    }
     if (stepButton) {
       shiftEditorImageSize(editor, Number(stepButton.dataset.imageStep));
       const currentImage = editorSelectedImage(editor);
@@ -1230,6 +1272,11 @@ function bindRichEditor(editorSelector, fileInputSelector) {
       insertEditorHtmlAtRange(editor, local
         ? `<p><img src="${local}" alt="事件图片" data-image-size="medium"></p>`
         : `<p>${escapeHtml(text.trim())}</p>`, pasteRange);
+      return;
+    }
+    if (text.trim() && /(https?:\/\/[^\s<]+|[\w.-]+\.[a-z]{2,}(?:\/[^\s<]*)?)/i.test(text)) {
+      event.preventDefault();
+      insertEditorHtmlAtRange(editor, plainTextToHtml(text), pasteRange);
     }
   });
 }
