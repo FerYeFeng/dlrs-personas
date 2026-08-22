@@ -1079,12 +1079,19 @@ function editorImageWidthValue(image) {
   return parseInt(image?.style?.width || "420", 10) || 420;
 }
 
+let editorContextMenuOpenAt = 0;
+
 function hideEditorContextMenu() {
   $(".editor-context-menu")?.remove();
 }
 
+function shouldKeepFreshEditorContextMenu() {
+  return Date.now() - editorContextMenuOpenAt < 220;
+}
+
 function showEditorContextMenu(editor, event) {
   hideEditorContextMenu();
+  editorContextMenuOpenAt = Date.now();
   const image = event.target?.closest?.("img");
   if (image && editor.contains(image)) {
     selectEditorImage(editor, image);
@@ -1122,9 +1129,17 @@ function showEditorContextMenu(editor, event) {
   const top = Math.min(event.clientY, innerHeight - menu.offsetHeight - 10);
   menu.style.left = `${Math.max(10, left)}px`;
   menu.style.top = `${Math.max(10, top)}px`;
-  menu.addEventListener("mousedown", (mouseEvent) => mouseEvent.preventDefault());
+  menu.addEventListener("pointerdown", (pointerEvent) => {
+    pointerEvent.stopPropagation();
+    if (pointerEvent.target.closest("button")) pointerEvent.preventDefault();
+  });
+  menu.addEventListener("mousedown", (mouseEvent) => {
+    mouseEvent.stopPropagation();
+    if (mouseEvent.target.closest("button")) mouseEvent.preventDefault();
+  });
   menu.addEventListener("click", (clickEvent) => {
     clickEvent.stopPropagation();
+    if (!clickEvent.target.closest("input")) clickEvent.preventDefault();
     const commandButton = clickEvent.target.closest("[data-format-command]");
     const fontApplyButton = clickEvent.target.closest("[data-font-size-apply]");
     const stepButton = clickEvent.target.closest("[data-image-step]");
@@ -1211,6 +1226,7 @@ function bindRichEditor(editorSelector, fileInputSelector) {
     editor.addEventListener(type, () => saveEditorSelection(editor));
   });
   editor.addEventListener("click", (event) => {
+    if (shouldKeepFreshEditorContextMenu()) return;
     hideEditorContextMenu();
     if (event.target?.tagName !== "IMG") return;
     selectEditorImage(editor, event.target);
@@ -1302,6 +1318,7 @@ function bindPersonBioEditor() {
 }
 
 document.addEventListener("click", (event) => {
+  if (shouldKeepFreshEditorContextMenu()) return;
   if (!event.target?.closest?.(".editor-context-menu")) hideEditorContextMenu();
 });
 document.addEventListener("scroll", hideEditorContextMenu, true);
