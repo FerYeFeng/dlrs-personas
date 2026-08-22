@@ -580,10 +580,16 @@ function compareIncidents(a, b) {
     || (b.updatedAt || b.createdAt || "").localeCompare(a.updatedAt || a.createdAt || "");
 }
 
+function sortPinnedIncidents(incidents) {
+  return [...incidents].filter((incident) => incident.pinned).sort((a, b) =>
+    (b.date || "").localeCompare(a.date || "")
+    || (b.updatedAt || b.createdAt || "").localeCompare(a.updatedAt || a.createdAt || "")
+  );
+}
+
 function sortHotIncidents(incidents) {
-  return [...incidents].sort((a, b) => {
-    const score = Number(!!b.pinned) - Number(!!a.pinned)
-      || incidentPersonIds(b).length - incidentPersonIds(a).length;
+  return [...incidents].filter((incident) => incident.recommended && !incident.pinned).sort((a, b) => {
+    const score = incidentPersonIds(b).length - incidentPersonIds(a).length;
     return score || (b.updatedAt || b.date || "").localeCompare(a.updatedAt || a.date || "");
   });
 }
@@ -591,10 +597,6 @@ function sortHotIncidents(incidents) {
 function sortRecentIncidents(incidents) {
   return [...incidents].sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned)
     || (b.updatedAt || b.createdAt || b.date || "").localeCompare(a.updatedAt || a.createdAt || a.date || ""));
-}
-
-function sortRecommendedIncidents(incidents) {
-  return [...incidents].filter((incident) => incident.recommended).sort(compareIncidents);
 }
 
 function incidentFlags(incident) {
@@ -630,17 +632,17 @@ function renderStats() {
 }
 
 function renderHome() {
-  const recommendedGrid = $("#recommendedGrid");
+  const pinnedGrid = $("#pinnedGrid");
   const hotGrid = $("#hotGrid");
   const recentGrid = $("#recentGrid");
   const input = $("#homeSearchInput");
-  if (recentGrid || hotGrid || recommendedGrid) {
+  if (recentGrid || hotGrid || pinnedGrid) {
     const render = () => {
       const incidents = filterIncidents(input?.value || "");
-      const recommended = sortRecommendedIncidents(incidents).slice(0, 6);
+      const pinned = sortPinnedIncidents(incidents).slice(0, 6);
       const hot = sortHotIncidents(incidents).slice(0, 6);
       const recent = sortRecentIncidents(incidents).slice(0, 6);
-      if (recommendedGrid) recommendedGrid.innerHTML = recommended.length ? recommended.map(homeIncidentCard).join("") : `<div class="empty">暂无推荐事件</div>`;
+      if (pinnedGrid) pinnedGrid.innerHTML = pinned.length ? pinned.map(homeIncidentCard).join("") : `<div class="empty">暂无置顶事件</div>`;
       if (hotGrid) hotGrid.innerHTML = hot.length ? hot.map(homeIncidentCard).join("") : `<div class="empty">暂无热门事件</div>`;
       if (recentGrid) recentGrid.innerHTML = recent.length ? recent.map(homeIncidentCard).join("") : `<div class="empty">暂无最近更新</div>`;
     };
