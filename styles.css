@@ -1003,10 +1003,9 @@ textarea { resize: vertical; }
   display: block;
   width: min(100%, 420px);
   max-width: 100%;
-  max-height: 360px;
+  height: auto;
   margin: 14px 0;
   border-radius: 6px;
-  object-fit: contain;
   background: #111;
 }
 .rich-editor blockquote,
