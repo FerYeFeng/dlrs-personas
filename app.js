@@ -149,12 +149,17 @@ function isAllowedImageSrc(src = "") {
 }
 
 function sanitizeFontSize(value = "") {
-  const size = String(value).trim();
-  return /^(13|14|16|18|20|24|28)px$/.test(size) ? size : "";
+  const numeric = parseInt(String(value).replace(/[^\d]/g, ""), 10);
+  if (!Number.isFinite(numeric)) return "";
+  return `${Math.max(10, Math.min(72, numeric))}px`;
 }
 
-function sanitizeImageSize(value = "") {
-  return ["small", "medium", "large"].includes(value) ? value : "";
+function sanitizeImageWidth(value = "") {
+  const named = { small: "260px", medium: "420px", large: "620px" };
+  if (named[String(value).trim()]) return named[String(value).trim()];
+  const numeric = parseInt(String(value).replace(/[^\d]/g, ""), 10);
+  if (!Number.isFinite(numeric)) return "";
+  return `${Math.max(120, Math.min(1200, numeric))}px`;
 }
 
 function normalizeHttpUrl(value = "") {
@@ -184,6 +189,12 @@ function sanitizeRichHtml(html = "") {
   const allowed = new Set(["P", "DIV", "BR", "B", "STRONG", "I", "EM", "U", "UL", "OL", "LI", "BLOCKQUOTE", "A", "IMG", "SPAN"]);
   const walk = (node) => {
     [...node.childNodes].forEach((child) => {
+      if (child.nodeType === Node.TEXT_NODE && child.parentElement?.tagName !== "A" && child.nodeValue && /(https?:\/\/[^\s<]+|[\w.-]+\.[a-z]{2,}(?:\/[^\s<]*)?)/i.test(child.nodeValue)) {
+        const template = document.createElement("template");
+        template.innerHTML = linkifyText(child.nodeValue);
+        child.replaceWith(...template.content.childNodes);
+        return;
+      }
       if (child.nodeType === Node.ELEMENT_NODE) {
         if (!allowed.has(child.tagName)) {
           walk(child);
@@ -193,7 +204,7 @@ function sanitizeRichHtml(html = "") {
         const href = child.getAttribute("href") || "";
         const src = child.getAttribute("src") || "";
         const fontSize = sanitizeFontSize(child.style?.fontSize || "");
-        const imageSize = sanitizeImageSize(child.dataset?.imageSize || "");
+        const imageWidth = sanitizeImageWidth(child.style?.width || child.dataset?.imageWidth || child.dataset?.imageSize || child.getAttribute("width") || "");
         [...child.attributes].forEach((attr) => child.removeAttribute(attr.name));
         if (child.tagName === "A") {
           if (/^https?:\/\//i.test(href)) {
@@ -209,7 +220,7 @@ function sanitizeRichHtml(html = "") {
           if (isAllowedImageSrc(src)) {
             child.setAttribute("src", src);
             child.setAttribute("alt", "事件图片");
-            if (imageSize) child.dataset.imageSize = imageSize;
+            if (imageWidth) child.style.width = imageWidth;
           } else {
             child.remove();
             return;
@@ -1035,15 +1046,15 @@ function applyEditorLink(editor, url) {
   saveEditorSelection(editor);
 }
 
-function applyEditorImageSize(editor, size) {
-  const safeSize = sanitizeImageSize(size);
-  if (!safeSize) return;
+function applyEditorImageWidth(editor, width) {
+  const safeWidth = sanitizeImageWidth(width);
+  if (!safeWidth) return;
   const selection = getSelection();
   const node = selection.rangeCount ? selection.anchorNode : null;
   const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
   const image = element?.closest?.("img");
   if (image && editor.contains(image)) {
-    image.dataset.imageSize = safeSize;
+    image.style.width = safeWidth;
   }
 }
 
@@ -1056,20 +1067,16 @@ function editorSelectedImage(editor) {
   return image && editor.contains(image) ? image : null;
 }
 
-function shiftEditorImageSize(editor, direction) {
+function shiftEditorImageWidth(editor, direction) {
   const image = editorSelectedImage(editor);
   if (!image) return;
-  const sizes = ["small", "medium", "large"];
-  const current = sanitizeImageSize(image.dataset.imageSize) || "medium";
-  const index = sizes.indexOf(current);
-  const next = sizes[Math.max(0, Math.min(sizes.length - 1, index + direction))];
-  image.dataset.imageSize = next;
+  const current = parseInt(image.style.width || "420", 10) || 420;
+  image.style.width = sanitizeImageWidth(current + direction * 40);
   saveEditorSelection(editor);
 }
 
-function editorImageSizeText(image) {
-  const value = sanitizeImageSize(image?.dataset.imageSize) || "medium";
-  return ({ small: "小", medium: "中", large: "大" })[value] || "中";
+function editorImageWidthValue(image) {
+  return parseInt(image?.style?.width || "420", 10) || 420;
 }
 
 function hideEditorContextMenu() {
@@ -1090,10 +1097,10 @@ function showEditorContextMenu(editor, event) {
   menu.className = "editor-context-menu";
   const isImage = !!(image && editor.contains(image));
   menu.innerHTML = isImage ? `
-    <div class="editor-context-title">图片大小</div>
+    <div class="editor-context-title">图片宽度</div>
     <div class="context-stepper">
       <button type="button" data-image-step="-1"><i class="material-icons">chevron_left</i></button>
-      <span data-image-size-label>${editorImageSizeText(image)}</span>
+      <input data-image-width type="number" min="120" max="1200" step="10" value="${editorImageWidthValue(image)}" />
       <button type="button" data-image-step="1"><i class="material-icons">chevron_right</i></button>
     </div>
   ` : `
@@ -1104,11 +1111,10 @@ function showEditorContextMenu(editor, event) {
       <button type="button" data-format-command="underline"><i class="material-icons">format_underlined</i></button>
       <button type="button" data-format-link><i class="material-icons">link</i></button>
     </div>
-    <div class="context-size-grid">
-      <button type="button" data-font-size="13px">小</button>
-      <button type="button" data-font-size="16px">正文</button>
-      <button type="button" data-font-size="20px">大</button>
-      <button type="button" data-font-size="24px">标题</button>
+    <div class="context-number-row">
+      <span>字号</span>
+      <input data-font-size-input type="number" min="10" max="72" step="1" value="16" />
+      <button type="button" data-font-size-apply>应用</button>
     </div>
   `;
   document.body.appendChild(menu);
@@ -1120,22 +1126,28 @@ function showEditorContextMenu(editor, event) {
   menu.addEventListener("click", (clickEvent) => {
     clickEvent.stopPropagation();
     const commandButton = clickEvent.target.closest("[data-format-command]");
-    const sizeButton = clickEvent.target.closest("[data-font-size]");
+    const fontApplyButton = clickEvent.target.closest("[data-font-size-apply]");
     const stepButton = clickEvent.target.closest("[data-image-step]");
     const linkButton = clickEvent.target.closest("[data-format-link]");
     if (commandButton) applyEditorCommand(editor, commandButton.dataset.formatCommand);
-    if (sizeButton) applyEditorFontSize(editor, sizeButton.dataset.fontSize);
+    if (fontApplyButton) {
+      const input = menu.querySelector("[data-font-size-input]");
+      applyEditorFontSize(editor, input?.value || "");
+    }
     if (linkButton) {
       const href = prompt("输入链接地址");
       if (href) applyEditorLink(editor, href);
     }
     if (stepButton) {
-      shiftEditorImageSize(editor, Number(stepButton.dataset.imageStep));
+      shiftEditorImageWidth(editor, Number(stepButton.dataset.imageStep));
       const currentImage = editorSelectedImage(editor);
-      const label = menu.querySelector("[data-image-size-label]");
-      if (label) label.textContent = editorImageSizeText(currentImage);
+      const input = menu.querySelector("[data-image-width]");
+      if (input) input.value = editorImageWidthValue(currentImage);
     }
-    if (!stepButton) hideEditorContextMenu();
+    if (!stepButton && !fontApplyButton) hideEditorContextMenu();
+  });
+  menu.querySelector("[data-image-width]")?.addEventListener("change", (inputEvent) => {
+    applyEditorImageWidth(editor, inputEvent.target.value);
   });
 }
 
@@ -1146,10 +1158,10 @@ function currentEditorRange(editor) {
     : savedEditorRange?.cloneRange() || null;
 }
 
-async function insertEditorImages(editor, files, size = "medium") {
+async function insertEditorImages(editor, files, width = "420") {
   const images = await readImageFiles(files, 1600);
-  const safeSize = sanitizeImageSize(size) || "medium";
-  const html = images.filter(Boolean).map((image) => `<p><img src="${image}" alt="事件图片" data-image-size="${safeSize}"></p>`).join("");
+  const safeWidth = sanitizeImageWidth(width) || "420px";
+  const html = images.filter(Boolean).map((image) => `<p><img src="${image}" alt="事件图片" style="width:${safeWidth}"></p>`).join("");
   if (html) insertEditorHtml(editor, html);
 }
 
@@ -1166,25 +1178,25 @@ async function importRemoteEditorImage(src) {
   }
 }
 
-async function importPastedHtml(html = "", imageSize = "medium") {
+async function importPastedHtml(html = "", imageWidth = "420") {
   const template = document.createElement("template");
   template.innerHTML = html;
   const images = [...template.content.querySelectorAll("img")];
-  const safeSize = sanitizeImageSize(imageSize) || "medium";
+  const safeWidth = sanitizeImageWidth(imageWidth) || "420px";
   for (const image of images) {
     const src = image.getAttribute("src") || "";
     if (/^https?:\/\//i.test(src)) {
       const local = await importRemoteEditorImage(src);
       if (local) {
         image.setAttribute("src", local);
-        image.dataset.imageSize = safeSize;
+        image.style.width = safeWidth;
       } else {
         const link = document.createElement("p");
         link.textContent = src;
         image.replaceWith(link);
       }
     } else if (isAllowedImageSrc(src)) {
-      image.dataset.imageSize = safeSize;
+      image.style.width = safeWidth;
     }
   }
   return sanitizeRichHtml(template.innerHTML);
@@ -1223,7 +1235,7 @@ function bindRichEditor(editorSelector, fileInputSelector) {
     fileInput?.click();
   });
   fileInput?.addEventListener("change", async () => {
-    await insertEditorImages(editor, fileInput.files || [], "medium");
+    await insertEditorImages(editor, fileInput.files || [], "420");
     fileInput.value = "";
   });
   ["dragenter", "dragover"].forEach((type) => {
@@ -1242,7 +1254,7 @@ function bindRichEditor(editorSelector, fileInputSelector) {
     const files = [...event.dataTransfer.files].filter((file) => file.type.startsWith("image/"));
     if (files.length) {
       saveEditorSelection(editor);
-      await insertEditorImages(editor, files, "medium");
+      await insertEditorImages(editor, files, "420");
     }
   });
   editor.addEventListener("paste", async (event) => {
@@ -1254,14 +1266,14 @@ function bindRichEditor(editorSelector, fileInputSelector) {
     if (files.length) {
       event.preventDefault();
       const images = await readImageFiles(files, 1600);
-      const imageHtml = images.filter(Boolean).map((image) => `<p><img src="${image}" alt="事件图片" data-image-size="medium"></p>`).join("");
+      const imageHtml = images.filter(Boolean).map((image) => `<p><img src="${image}" alt="事件图片" style="width:420px"></p>`).join("");
       if (imageHtml) insertEditorHtmlAtRange(editor, imageHtml, pasteRange);
       return;
     }
     const html = event.clipboardData?.getData("text/html") || "";
     if (html.trim()) {
       event.preventDefault();
-      const pasted = await importPastedHtml(html, "medium");
+      const pasted = await importPastedHtml(html, "420");
       insertEditorHtmlAtRange(editor, pasted || plainTextToHtml(event.clipboardData?.getData("text/plain") || ""), pasteRange);
       return;
     }
@@ -1270,7 +1282,7 @@ function bindRichEditor(editorSelector, fileInputSelector) {
       event.preventDefault();
       const local = await importRemoteEditorImage(text.trim());
       insertEditorHtmlAtRange(editor, local
-        ? `<p><img src="${local}" alt="事件图片" data-image-size="medium"></p>`
+        ? `<p><img src="${local}" alt="事件图片" style="width:420px"></p>`
         : `<p>${escapeHtml(text.trim())}</p>`, pasteRange);
       return;
     }
