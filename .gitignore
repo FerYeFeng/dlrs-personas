@@ -3,7 +3,6 @@ npm-debug.log*
 
 data/db.json
 data/*.tmp
-uploads/
 
 .env
 .env.*
