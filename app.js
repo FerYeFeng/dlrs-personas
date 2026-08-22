@@ -644,7 +644,11 @@ function renderIncidentsPage() {
 }
 
 function fillIncidentPersonSelect() {
-  renderIncidentPersonPicker([]);
+  const params = new URLSearchParams(location.search);
+  const selectedIds = [];
+  const personId = params.get("personId") || params.get("person");
+  if (personId && personById(personId)) selectedIds.push(personId);
+  renderIncidentPersonPicker(selectedIds);
 }
 
 function renderIncidentPersonPicker(selectedIds = []) {
@@ -947,6 +951,8 @@ function bindUploadCards() {
 function bindPersonForm() {
   const form = $("#personForm");
   if (!form) return;
+  if (form.dataset.bound === "1") return;
+  form.dataset.bound = "1";
   if (needsLogin()) return;
   if (new URLSearchParams(location.search).has("id") && !isAdmin()) return;
   const editId = new URLSearchParams(location.search).get("id");
@@ -959,69 +965,83 @@ function bindPersonForm() {
   if (editingPerson) fillPersonForm(form, editingPerson);
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const data = new FormData(form);
-    const now = new Date().toISOString();
-    const avatar = await readImageFile(data.get("avatar"), 512);
-    const banner = await readImageFile(data.get("banner"), 1600);
-    const name = data.get("name").trim() || "未命名人物";
-    const accounts = {
-      qq: data.get("qq").trim(),
-      bilibili: data.get("bilibili").trim(),
-      douyin: data.get("douyin").trim(),
-      gas: data.get("gas").trim()
-    };
-    const accountError = validateAccounts(accounts);
-    if (accountError) {
-      alert(accountError);
-      return;
-    }
-    const payload = {
-      id: editingPerson?.id || createId(),
-      name,
-      tags: splitList(data.get("tags") || ""),
-      bioHtml: sanitizeRichHtml($("#personBioEditor")?.innerHTML || ""),
-      bio: richTextToPlainText($("#personBioEditor")?.innerHTML || "").trim(),
-      avatar: avatar || editingPerson?.avatar || "",
-      banner: banner || editingPerson?.banner || "",
-      status: data.get("status").trim() || "未标注",
-      credibility: editingPerson?.credibility || "unverified",
-      accounts,
-      createdAt: editingPerson?.createdAt || now,
-      updatedAt: now
-    };
-    if (editingPerson) {
-      if (serverAvailable) {
-        Object.assign(editingPerson, await apiRequest(`/api/people/${encodeURIComponent(editingPerson.id)}`, {
-          method: "PUT",
-          body: JSON.stringify(personPayloadForServer(payload))
-        }));
-      } else {
-        Object.assign(editingPerson, payload);
+    if (form.dataset.submitting === "1") return;
+    const submitButton = form.querySelector('[type="submit"]');
+    try {
+      form.dataset.submitting = "1";
+      if (submitButton) submitButton.disabled = true;
+      const data = new FormData(form);
+      const now = new Date().toISOString();
+      const avatar = await readImageFile(data.get("avatar"), 512);
+      const banner = await readImageFile(data.get("banner"), 1600);
+      const name = data.get("name").trim() || "未命名人物";
+      const accounts = {
+        qq: data.get("qq").trim(),
+        bilibili: data.get("bilibili").trim(),
+        douyin: data.get("douyin").trim(),
+        gas: data.get("gas").trim()
+      };
+      const accountError = validateAccounts(accounts);
+      if (accountError) {
+        alert(accountError);
+        form.dataset.submitting = "0";
+        if (submitButton) submitButton.disabled = false;
+        return;
       }
-    } else {
-      if (serverAvailable) {
-        const result = await apiRequest("/api/people", {
-          method: "POST",
-          body: JSON.stringify(personPayloadForServer(payload))
-        });
-        if (result.pending) {
-          alert("已提交，等待管理员审核。");
-          location.href = "./people.html";
-          return;
+      const payload = {
+        id: editingPerson?.id || createId(),
+        name,
+        tags: splitList(data.get("tags") || ""),
+        bioHtml: sanitizeRichHtml($("#personBioEditor")?.innerHTML || ""),
+        bio: richTextToPlainText($("#personBioEditor")?.innerHTML || "").trim(),
+        avatar: avatar || editingPerson?.avatar || "",
+        banner: banner || editingPerson?.banner || "",
+        status: data.get("status").trim() || "未标注",
+        credibility: editingPerson?.credibility || "unverified",
+        accounts,
+        createdAt: editingPerson?.createdAt || now,
+        updatedAt: now
+      };
+      if (editingPerson) {
+        if (serverAvailable) {
+          Object.assign(editingPerson, await apiRequest(`/api/people/${encodeURIComponent(editingPerson.id)}`, {
+            method: "PUT",
+            body: JSON.stringify(personPayloadForServer(payload))
+          }));
+        } else {
+          Object.assign(editingPerson, payload);
         }
-        state.people.unshift(result);
       } else {
-        state.people.unshift(payload);
+        if (serverAvailable) {
+          const result = await apiRequest("/api/people", {
+            method: "POST",
+            body: JSON.stringify(personPayloadForServer(payload))
+          });
+          if (result.pending) {
+            alert("已提交，等待管理员审核。");
+            location.href = "./people.html";
+            return;
+          }
+          state.people.unshift(result);
+        } else {
+          state.people.unshift(payload);
+        }
       }
+      saveState();
+      location.href = editingPerson ? `./person.html?id=${encodeURIComponent(editingPerson.id)}` : "./people.html";
+    } catch (error) {
+      alert(error.message);
+      form.dataset.submitting = "0";
+      if (submitButton) submitButton.disabled = false;
     }
-    saveState();
-    location.href = editingPerson ? `./person.html?id=${encodeURIComponent(editingPerson.id)}` : "./people.html";
   });
 }
 
 function bindIncidentForm() {
   const form = $("#incidentForm");
   if (!form) return;
+  if (form.dataset.bound === "1") return;
+  form.dataset.bound = "1";
   if (needsLogin()) return;
   if (new URLSearchParams(location.search).has("id") && !isAdmin()) return;
   fillIncidentPersonSelect();
@@ -1035,76 +1055,88 @@ function bindIncidentForm() {
   if (editingIncident) fillIncidentForm(form, editingIncident);
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const data = new FormData(form);
-    if (!isValidDateValue(data.get("date"))) {
-      alert("日期年份必须是四位数");
-      return;
-    }
-    const contentHtml = sanitizeRichHtml($("#incidentEditor")?.innerHTML || "");
-    let personIds = data.getAll("personIds").filter(Boolean);
-    if (!personIds.length && isAdmin()) {
-      const personId = createId();
-      const now = new Date().toISOString();
-      state.people.unshift({
-        id: personId,
-        name: "未归档人物",
-        tags: [],
-        bio: "",
-        avatar: "",
-        banner: "",
-        status: "controversial",
-        credibility: "unverified",
-        accounts: { qq: "", bilibili: "", douyin: "", gas: "" },
-        createdAt: now,
-        updatedAt: now
-      });
-      personIds = [personId];
-    }
-    const payload = {
-      id: editingIncident?.id || createId(),
-      personId: personIds[0] || "",
-      personIds,
-      title: data.get("title").trim() || "未命名事件",
-      date: data.get("date") || new Date().toISOString().slice(0, 10),
-      category: data.get("category").trim() || "未标注",
-      detail: incidentPlainText({ contentHtml }).trim(),
-      evidence: "",
-      contentHtml,
-      images: [],
-      result: data.get("result").trim(),
-      credibility: editingIncident?.credibility || "unverified",
-      createdAt: editingIncident?.createdAt || new Date().toISOString()
-    };
-    if (editingIncident) {
-      if (serverAvailable) {
-        Object.assign(editingIncident, await apiRequest(`/api/incidents/${encodeURIComponent(editingIncident.id)}`, {
-          method: "PUT",
-          body: JSON.stringify(incidentPayloadForServer(payload))
-        }));
-      } else {
-        Object.assign(editingIncident, payload);
+    if (form.dataset.submitting === "1") return;
+    const submitButton = form.querySelector('[type="submit"]');
+    try {
+      form.dataset.submitting = "1";
+      if (submitButton) submitButton.disabled = true;
+      const data = new FormData(form);
+      if (!isValidDateValue(data.get("date"))) {
+        alert("日期年份必须是四位数");
+        form.dataset.submitting = "0";
+        if (submitButton) submitButton.disabled = false;
+        return;
       }
-    } else {
-      if (serverAvailable) {
-        const result = await apiRequest("/api/incidents", {
-          method: "POST",
-          body: JSON.stringify(incidentPayloadForServer(payload))
+      const contentHtml = sanitizeRichHtml($("#incidentEditor")?.innerHTML || "");
+      let personIds = data.getAll("personIds").filter(Boolean);
+      if (!personIds.length && isAdmin()) {
+        const personId = createId();
+        const now = new Date().toISOString();
+        state.people.unshift({
+          id: personId,
+          name: "未归档人物",
+          tags: [],
+          bio: "",
+          avatar: "",
+          banner: "",
+          status: "controversial",
+          credibility: "unverified",
+          accounts: { qq: "", bilibili: "", douyin: "", gas: "" },
+          createdAt: now,
+          updatedAt: now
         });
-        if (result.pending) {
-          alert("已提交，等待管理员审核。");
-          location.href = "./incidents.html";
-          return;
-        }
-        state.incidents.unshift(result);
-      } else {
-        state.incidents.unshift(payload);
+        personIds = [personId];
       }
+      const payload = {
+        id: editingIncident?.id || createId(),
+        personId: personIds[0] || "",
+        personIds,
+        title: data.get("title").trim() || "未命名事件",
+        date: data.get("date") || new Date().toISOString().slice(0, 10),
+        category: data.get("category").trim() || "未标注",
+        detail: incidentPlainText({ contentHtml }).trim(),
+        evidence: "",
+        contentHtml,
+        images: [],
+        result: data.get("result").trim(),
+        credibility: editingIncident?.credibility || "unverified",
+        createdAt: editingIncident?.createdAt || new Date().toISOString()
+      };
+      if (editingIncident) {
+        if (serverAvailable) {
+          Object.assign(editingIncident, await apiRequest(`/api/incidents/${encodeURIComponent(editingIncident.id)}`, {
+            method: "PUT",
+            body: JSON.stringify(incidentPayloadForServer(payload))
+          }));
+        } else {
+          Object.assign(editingIncident, payload);
+        }
+      } else {
+        if (serverAvailable) {
+          const result = await apiRequest("/api/incidents", {
+            method: "POST",
+            body: JSON.stringify(incidentPayloadForServer(payload))
+          });
+          if (result.pending) {
+            alert("已提交，等待管理员审核。");
+            location.href = "./incidents.html";
+            return;
+          }
+          state.incidents.unshift(result);
+        } else {
+          state.incidents.unshift(payload);
+        }
+      }
+      personIds.map(personById).filter(Boolean).forEach((person) => {
+        person.updatedAt = new Date().toISOString();
+      });
+      saveState();
+      location.href = personIds[0] ? `./person.html?id=${encodeURIComponent(personIds[0])}` : "./incidents.html";
+    } catch (error) {
+      alert(error.message);
+      form.dataset.submitting = "0";
+      if (submitButton) submitButton.disabled = false;
     }
-    personIds.map(personById).filter(Boolean).forEach((person) => {
-      person.updatedAt = new Date().toISOString();
-    });
-    saveState();
-    location.href = personIds[0] ? `./person.html?id=${encodeURIComponent(personIds[0])}` : "./incidents.html";
   });
 }
 
@@ -1163,7 +1195,7 @@ function renderPersonDetail() {
     <section class="section">
       <div class="section-title app-title">
         <h2>事件时间线</h2>
-        <a class="a" href="./add-incident.html">添加事件</a>
+        <a class="a" href="./add-incident.html?personId=${encodeURIComponent(person.id)}">添加事件</a>
       </div>
       <div class="timeline">${incidents.length ? incidents.map(incidentItem).join("") : `<div class="empty">暂无事件记录</div>`}</div>
     </section>
