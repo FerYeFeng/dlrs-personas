@@ -1013,27 +1013,37 @@ function applyEditorCommand(editor, command, range = null) {
   runWithEditorRange(editor, range, () => document.execCommand(command, false, null));
 }
 
+function wrapRangeWithSpan(range, style = {}) {
+  const activeRange = range.cloneRange();
+  if (activeRange.collapsed) return null;
+  const span = document.createElement("span");
+  Object.assign(span.style, style);
+  try {
+    activeRange.surroundContents(span);
+  } catch {
+    span.appendChild(activeRange.extractContents());
+    activeRange.insertNode(span);
+  }
+  return span;
+}
+
+function selectNodeContentsInEditor(editor, node) {
+  const range = document.createRange();
+  range.selectNodeContents(node);
+  const selection = getSelection();
+  editor.focus();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  savedEditorRange = range.cloneRange();
+  return range;
+}
+
 function applyEditorFontSize(editor, size, range = null) {
   const safeSize = sanitizeFontSize(size);
-  if (!safeSize) return;
-  runWithEditorRange(editor, range, () => {
-    const selection = getSelection();
-    if (!selection.rangeCount || selection.isCollapsed) return;
-    const activeRange = selection.getRangeAt(0);
-    const span = document.createElement("span");
-    span.style.fontSize = safeSize;
-    try {
-      activeRange.surroundContents(span);
-    } catch {
-      span.appendChild(activeRange.extractContents());
-      activeRange.insertNode(span);
-    }
-    selection.removeAllRanges();
-    const nextRange = document.createRange();
-    nextRange.selectNodeContents(span);
-    nextRange.collapse(false);
-    selection.addRange(nextRange);
-  });
+  const activeRange = range?.cloneRange() || savedEditorRange?.cloneRange();
+  if (!safeSize || !activeRange || activeRange.collapsed) return null;
+  const span = wrapRangeWithSpan(activeRange, { fontSize: safeSize });
+  return span ? selectNodeContentsInEditor(editor, span) : null;
 }
 
 function applyEditorLink(editor, url, range = null) {
@@ -1127,7 +1137,7 @@ function showEditorContextMenu(editor, event) {
     const selectedInside = selection.rangeCount && editor.contains(selection.anchorNode) && !selection.isCollapsed;
     if (!selectedInside) selectEditorBlock(editor, event.target);
   }
-  const menuRange = savedEditorRange?.cloneRange() || null;
+  let menuRange = savedEditorRange?.cloneRange() || null;
   const menuImage = image && editor.contains(image) ? image : null;
   const menu = document.createElement("div");
   menu.className = "editor-context-menu";
@@ -1180,7 +1190,8 @@ function showEditorContextMenu(editor, event) {
     }
     if (fontApplyButton) {
       const input = menu.querySelector("[data-font-size-input]");
-      applyEditorFontSize(editor, input?.value || "", menuRange);
+      const nextRange = applyEditorFontSize(editor, input?.value || "", menuRange);
+      if (nextRange) menuRange = nextRange.cloneRange();
       updateEditorContextMenuState(editor, menu);
     }
     if (linkButton) {
