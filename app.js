@@ -351,6 +351,24 @@ function splitList(value = "") {
   return value.split(/[,，]/).map((item) => item.trim()).filter(Boolean);
 }
 
+function tagsFromForm(form) {
+  const input = form.elements.tags;
+  const entry = form.querySelector("[data-tag-entry]");
+  const pendingTag = String(entry?.value || "").trim();
+  if (!input) return pendingTag ? [pendingTag] : [];
+  try {
+    const parsed = JSON.parse(input.value || "[]");
+    if (Array.isArray(parsed)) {
+      const tags = parsed.map((item) => String(item).trim()).filter(Boolean);
+      if (pendingTag && !tags.includes(pendingTag)) tags.push(pendingTag);
+      return tags;
+    }
+  } catch {}
+  const tags = splitList(input.value || "");
+  if (pendingTag && !tags.includes(pendingTag)) tags.push(pendingTag);
+  return tags;
+}
+
 function isValidHttpUrl(value) {
   if (!value) return true;
   try {
@@ -696,7 +714,7 @@ function fillPersonForm(form, person) {
   form.elements.bilibili.value = person.accounts?.bilibili || "";
   form.elements.douyin.value = person.accounts?.douyin || "";
   form.elements.gas.value = person.accounts?.gas || "";
-  form.elements.tags.value = (person.tags || []).join(", ");
+  setTagInputValues(form, person.tags || []);
   const avatarCard = form.elements.avatar?.closest(".upload-card");
   const bannerCard = form.elements.banner?.closest(".upload-card");
   if (avatarCard) avatarCard.dataset.previewSrc = person.avatar || "";
@@ -706,6 +724,72 @@ function fillPersonForm(form, person) {
   const bioEditor = $("#personBioEditor");
   if (bioEditor) bioEditor.innerHTML = personBioHtml(person);
   form.elements.status.value = person.status || "active";
+}
+
+function bindTagInput(form) {
+  const root = form.querySelector("[data-tag-input]");
+  if (!root || root.dataset.bound === "1") return;
+  root.dataset.bound = "1";
+  const list = root.querySelector("[data-tag-list]");
+  const entry = root.querySelector("[data-tag-entry]");
+  const hidden = root.querySelector('input[name="tags"]');
+  const tags = [];
+
+  const sync = () => {
+    hidden.value = JSON.stringify(tags);
+    list.innerHTML = tags.map((tag, index) => `
+      <span class="tag-input__pill">
+        ${escapeHtml(tag)}
+        <button type="button" aria-label="删除 ${escapeHtml(tag)}" data-tag-remove="${index}">
+          <i class="material-icons">close</i>
+        </button>
+      </span>
+    `).join("");
+  };
+  const add = (value) => {
+    const tag = String(value || "").trim();
+    if (!tag || tags.includes(tag)) return;
+    tags.push(tag);
+    sync();
+  };
+
+  root.setTags = (values = []) => {
+    tags.splice(0, tags.length, ...values.map((item) => String(item).trim()).filter(Boolean));
+    sync();
+  };
+  list.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-tag-remove]");
+    if (!button) return;
+    tags.splice(Number(button.dataset.tagRemove), 1);
+    sync();
+    entry.focus();
+  });
+  root.addEventListener("click", () => entry.focus());
+  entry.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      add(entry.value);
+      entry.value = "";
+    }
+    if (event.key === "Backspace" && !entry.value && tags.length) {
+      tags.pop();
+      sync();
+    }
+  });
+  entry.addEventListener("blur", () => {
+    add(entry.value);
+    entry.value = "";
+  });
+  sync();
+}
+
+function setTagInputValues(form, values = []) {
+  const root = form.querySelector("[data-tag-input]");
+  if (root?.setTags) {
+    root.setTags(values);
+  } else if (form.elements.tags) {
+    form.elements.tags.value = JSON.stringify(values);
+  }
 }
 
 function fillIncidentForm(form, incident) {
@@ -962,6 +1046,7 @@ function bindPersonForm() {
     return;
   }
   bindPersonBioEditor();
+  bindTagInput(form);
   if (editingPerson) fillPersonForm(form, editingPerson);
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -991,7 +1076,7 @@ function bindPersonForm() {
       const payload = {
         id: editingPerson?.id || createId(),
         name,
-        tags: splitList(data.get("tags") || ""),
+        tags: tagsFromForm(form),
         bioHtml: sanitizeRichHtml($("#personBioEditor")?.innerHTML || ""),
         bio: richTextToPlainText($("#personBioEditor")?.innerHTML || "").trim(),
         avatar: avatar || editingPerson?.avatar || "",

@@ -33,7 +33,13 @@
             </div>
             <label>昵称<input name="name" placeholder="例如：某某作者" /></label>
             <div class="form-row four"><label>QQ<input name="qq" inputmode="numeric" pattern="[0-9]*" placeholder="纯数字 QQ 号" /></label><label>Bilibili<input name="bilibili" type="url" placeholder="https://space.bilibili.com/..." /></label><label>抖音<input name="douyin" type="url" placeholder="https://www.douyin.com/..." /></label><label>GAS<input name="gas" placeholder="GAS UID" /></label></div>
-            <label>身份标签<input name="tags" placeholder="关卡作者, UP主, 争议人物" /></label>
+            <label class="tag-input-label">身份标签
+              <div class="tag-input" data-tag-input>
+                <div class="tag-input__list" data-tag-list></div>
+                <input data-tag-entry placeholder="输入标签后按 Enter" />
+                <input name="tags" type="hidden" />
+              </div>
+            </label>
             <div class="editor-label">
               <span>简介</span>
               <div class="editor-shell">
