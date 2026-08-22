@@ -876,8 +876,7 @@ textarea { resize: vertical; }
   border-bottom: 1px solid var(--line);
   background: rgba(255,255,255,.04);
 }
-.editor-toolbar button,
-.editor-toolbar select {
+.editor-toolbar button {
   width: 34px;
   height: 30px;
   display: inline-grid;
@@ -888,13 +887,7 @@ textarea { resize: vertical; }
   background: #202020;
   cursor: pointer;
 }
-.editor-toolbar select {
-  width: auto;
-  min-width: 78px;
-  padding: 0 8px;
-}
-.editor-toolbar button:hover,
-.editor-toolbar select:hover {
+.editor-toolbar button:hover {
   border-color: var(--accent);
   background: rgba(68,138,255,.14);
 }
@@ -920,6 +913,60 @@ textarea { resize: vertical; }
 }
 .rich-editor.drag-over {
   background: rgba(68,138,255,.1);
+}
+.editor-context-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 188px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--white);
+  background: #202020;
+  box-shadow: 0 10px 30px #0009;
+}
+.editor-context-title {
+  padding: 4px 6px 8px;
+  color: var(--gray);
+  font-size: 12px;
+}
+.context-row,
+.context-size-grid,
+.context-stepper {
+  display: flex;
+  gap: 6px;
+}
+.context-size-grid {
+  margin-top: 6px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.editor-context-menu button {
+  min-width: 34px;
+  height: 32px;
+  padding: 0 8px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--white);
+  background: #151515;
+  cursor: pointer;
+}
+.editor-context-menu button:hover {
+  border-color: var(--accent);
+  background: rgba(68,138,255,.14);
+}
+.editor-context-menu i {
+  font-size: 20px;
+}
+.context-stepper {
+  align-items: center;
+}
+.context-stepper span {
+  min-width: 48px;
+  text-align: center;
+  color: var(--white);
 }
 .rich-editor p,
 .incident-content p {

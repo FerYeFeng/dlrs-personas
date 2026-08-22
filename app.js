@@ -945,6 +945,37 @@ function insertEditorHtmlAtRange(editor, html, range) {
   insertEditorHtml(editor, html);
 }
 
+function editorBlockForNode(node, editor) {
+  const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+  return element?.closest?.("p, div, li, blockquote, h1, h2, h3") || editor;
+}
+
+function selectEditorBlock(editor, node) {
+  const block = editorBlockForNode(node, editor);
+  const range = document.createRange();
+  range.selectNodeContents(block);
+  const selection = getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  saveEditorSelection(editor);
+}
+
+function selectEditorImage(editor, image) {
+  if (!image || !editor.contains(image)) return;
+  const range = document.createRange();
+  range.selectNode(image);
+  const selection = getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  saveEditorSelection(editor);
+}
+
+function applyEditorCommand(editor, command) {
+  restoreEditorSelection(editor);
+  document.execCommand(command, false, null);
+  saveEditorSelection(editor);
+}
+
 function applyEditorFontSize(editor, size) {
   const safeSize = sanitizeFontSize(size);
   if (!safeSize) return;
@@ -978,6 +1009,92 @@ function applyEditorImageSize(editor, size) {
   if (image && editor.contains(image)) {
     image.dataset.imageSize = safeSize;
   }
+}
+
+function editorSelectedImage(editor) {
+  const selection = getSelection();
+  if (!selection.rangeCount) return null;
+  const node = selection.anchorNode;
+  const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+  const image = element?.tagName === "IMG" ? element : element?.closest?.("img");
+  return image && editor.contains(image) ? image : null;
+}
+
+function shiftEditorImageSize(editor, direction) {
+  const image = editorSelectedImage(editor);
+  if (!image) return;
+  const sizes = ["small", "medium", "large"];
+  const current = sanitizeImageSize(image.dataset.imageSize) || "medium";
+  const index = sizes.indexOf(current);
+  const next = sizes[Math.max(0, Math.min(sizes.length - 1, index + direction))];
+  image.dataset.imageSize = next;
+  saveEditorSelection(editor);
+}
+
+function editorImageSizeText(image) {
+  const value = sanitizeImageSize(image?.dataset.imageSize) || "medium";
+  return ({ small: "小", medium: "中", large: "大" })[value] || "中";
+}
+
+function hideEditorContextMenu() {
+  $(".editor-context-menu")?.remove();
+}
+
+function showEditorContextMenu(editor, event) {
+  hideEditorContextMenu();
+  const image = event.target?.closest?.("img");
+  if (image && editor.contains(image)) {
+    selectEditorImage(editor, image);
+  } else {
+    const selection = getSelection();
+    const selectedInside = selection.rangeCount && editor.contains(selection.anchorNode) && !selection.isCollapsed;
+    if (!selectedInside) selectEditorBlock(editor, event.target);
+  }
+  const menu = document.createElement("div");
+  menu.className = "editor-context-menu";
+  const isImage = !!(image && editor.contains(image));
+  menu.innerHTML = isImage ? `
+    <div class="editor-context-title">图片大小</div>
+    <div class="context-stepper">
+      <button type="button" data-image-step="-1"><i class="material-icons">chevron_left</i></button>
+      <span data-image-size-label>${editorImageSizeText(image)}</span>
+      <button type="button" data-image-step="1"><i class="material-icons">chevron_right</i></button>
+    </div>
+  ` : `
+    <div class="editor-context-title">文字格式</div>
+    <div class="context-row">
+      <button type="button" data-format-command="bold"><i class="material-icons">format_bold</i></button>
+      <button type="button" data-format-command="italic"><i class="material-icons">format_italic</i></button>
+      <button type="button" data-format-command="underline"><i class="material-icons">format_underlined</i></button>
+    </div>
+    <div class="context-size-grid">
+      <button type="button" data-font-size="13px">小</button>
+      <button type="button" data-font-size="16px">正文</button>
+      <button type="button" data-font-size="20px">大</button>
+      <button type="button" data-font-size="24px">标题</button>
+    </div>
+  `;
+  document.body.appendChild(menu);
+  const left = Math.min(event.clientX, innerWidth - menu.offsetWidth - 10);
+  const top = Math.min(event.clientY, innerHeight - menu.offsetHeight - 10);
+  menu.style.left = `${Math.max(10, left)}px`;
+  menu.style.top = `${Math.max(10, top)}px`;
+  menu.addEventListener("mousedown", (mouseEvent) => mouseEvent.preventDefault());
+  menu.addEventListener("click", (clickEvent) => {
+    clickEvent.stopPropagation();
+    const commandButton = clickEvent.target.closest("[data-format-command]");
+    const sizeButton = clickEvent.target.closest("[data-font-size]");
+    const stepButton = clickEvent.target.closest("[data-image-step]");
+    if (commandButton) applyEditorCommand(editor, commandButton.dataset.formatCommand);
+    if (sizeButton) applyEditorFontSize(editor, sizeButton.dataset.fontSize);
+    if (stepButton) {
+      shiftEditorImageSize(editor, Number(stepButton.dataset.imageStep));
+      const currentImage = editorSelectedImage(editor);
+      const label = menu.querySelector("[data-image-size-label]");
+      if (label) label.textContent = editorImageSizeText(currentImage);
+    }
+    if (!stepButton) hideEditorContextMenu();
+  });
 }
 
 function currentEditorRange(editor) {
@@ -1036,19 +1153,17 @@ function bindRichEditor(editorSelector, fileInputSelector) {
   if (!editor) return;
   const shell = editor.closest(".editor-shell") || document;
   const fileInput = $(fileInputSelector);
-  const fontSizeSelect = shell.querySelector("[data-editor-font-size]");
-  const imageSizeSelect = shell.querySelector("[data-editor-image-size]");
   ["keyup", "mouseup", "focus", "input"].forEach((type) => {
     editor.addEventListener(type, () => saveEditorSelection(editor));
   });
   editor.addEventListener("click", (event) => {
+    hideEditorContextMenu();
     if (event.target?.tagName !== "IMG") return;
-    const range = document.createRange();
-    range.selectNode(event.target);
-    const selection = getSelection();
-    selection.removeAllRanges();
-    selection.addRange(range);
-    saveEditorSelection(editor);
+    selectEditorImage(editor, event.target);
+  });
+  editor.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    showEditorContextMenu(editor, event);
   });
   [...shell.querySelectorAll("[data-editor-command]")].forEach((button) => {
     button.addEventListener("mousedown", (event) => event.preventDefault());
@@ -1066,15 +1181,8 @@ function bindRichEditor(editorSelector, fileInputSelector) {
     fileInput?.click();
   });
   fileInput?.addEventListener("change", async () => {
-    await insertEditorImages(editor, fileInput.files || [], imageSizeSelect?.value || "medium");
+    await insertEditorImages(editor, fileInput.files || [], "medium");
     fileInput.value = "";
-  });
-  fontSizeSelect?.addEventListener("change", () => {
-    applyEditorFontSize(editor, fontSizeSelect.value);
-    fontSizeSelect.value = "";
-  });
-  imageSizeSelect?.addEventListener("change", () => {
-    applyEditorImageSize(editor, imageSizeSelect.value);
   });
   ["dragenter", "dragover"].forEach((type) => {
     editor.addEventListener(type, (event) => {
@@ -1092,7 +1200,7 @@ function bindRichEditor(editorSelector, fileInputSelector) {
     const files = [...event.dataTransfer.files].filter((file) => file.type.startsWith("image/"));
     if (files.length) {
       saveEditorSelection(editor);
-      await insertEditorImages(editor, files, imageSizeSelect?.value || "medium");
+      await insertEditorImages(editor, files, "medium");
     }
   });
   editor.addEventListener("paste", async (event) => {
@@ -1104,15 +1212,14 @@ function bindRichEditor(editorSelector, fileInputSelector) {
     if (files.length) {
       event.preventDefault();
       const images = await readImageFiles(files, 1600);
-      const safeSize = sanitizeImageSize(imageSizeSelect?.value || "medium") || "medium";
-      const imageHtml = images.filter(Boolean).map((image) => `<p><img src="${image}" alt="事件图片" data-image-size="${safeSize}"></p>`).join("");
+      const imageHtml = images.filter(Boolean).map((image) => `<p><img src="${image}" alt="事件图片" data-image-size="medium"></p>`).join("");
       if (imageHtml) insertEditorHtmlAtRange(editor, imageHtml, pasteRange);
       return;
     }
     const html = event.clipboardData?.getData("text/html") || "";
     if (html.trim()) {
       event.preventDefault();
-      const pasted = await importPastedHtml(html, imageSizeSelect?.value || "medium");
+      const pasted = await importPastedHtml(html, "medium");
       insertEditorHtmlAtRange(editor, pasted || plainTextToHtml(event.clipboardData?.getData("text/plain") || ""), pasteRange);
       return;
     }
@@ -1121,7 +1228,7 @@ function bindRichEditor(editorSelector, fileInputSelector) {
       event.preventDefault();
       const local = await importRemoteEditorImage(text.trim());
       insertEditorHtmlAtRange(editor, local
-        ? `<p><img src="${local}" alt="事件图片" data-image-size="${sanitizeImageSize(imageSizeSelect?.value || "medium") || "medium"}"></p>`
+        ? `<p><img src="${local}" alt="事件图片" data-image-size="medium"></p>`
         : `<p>${escapeHtml(text.trim())}</p>`, pasteRange);
     }
   });
@@ -1134,6 +1241,11 @@ function bindIncidentEditor() {
 function bindPersonBioEditor() {
   bindRichEditor("#personBioEditor", "#personBioEditorImage");
 }
+
+document.addEventListener("click", (event) => {
+  if (!event.target?.closest?.(".editor-context-menu")) hideEditorContextMenu();
+});
+document.addEventListener("scroll", hideEditorContextMenu, true);
 
 function setUploadCardPreview(card, src = "") {
   if (!card) return;
