@@ -50,6 +50,7 @@ function loadState() {
       result: "",
       pinned: false,
       recommended: false,
+      viewCount: 0,
       personIds: incident.personIds || [incident.personId].filter(Boolean),
       ...incident
     }));
@@ -588,9 +589,11 @@ function sortPinnedIncidents(incidents) {
 }
 
 function sortHotIncidents(incidents) {
-  return [...incidents].filter((incident) => incident.recommended && !incident.pinned).sort((a, b) => {
-    const score = incidentPersonIds(b).length - incidentPersonIds(a).length;
-    return score || (b.updatedAt || b.date || "").localeCompare(a.updatedAt || a.date || "");
+  return [...incidents].filter((incident) => !incident.pinned).sort((a, b) => {
+    const score = Number(b.viewCount || 0) - Number(a.viewCount || 0);
+    return score
+      || Number(!!b.recommended) - Number(!!a.recommended)
+      || (b.updatedAt || b.date || "").localeCompare(a.updatedAt || a.date || "");
   });
 }
 
@@ -609,15 +612,36 @@ function incidentFlags(incident) {
 function homeIncidentCard(incident) {
   const firstPerson = peopleForIncident(incident)[0];
   return `
-    <a class="recent-card" href="${firstPerson ? `./person.html?id=${encodeURIComponent(firstPerson.id)}` : "./incidents.html"}">
+    <a class="recent-card" data-incident-view="${escapeHtml(incident.id)}" href="${firstPerson ? `./person.html?id=${encodeURIComponent(firstPerson.id)}` : "./incidents.html"}">
       <div class="recent-cover">${incidentCoverTiles(incident)}</div>
       <div class="recent-body">
         <div class="incident-flags">${incidentFlags(incident)}</div>
         <h3>${escapeHtml(incident.title)}</h3>
-        <p>${escapeHtml(incident.date || "未填写日期")} · ${peopleForIncident(incident).map((person) => escapeHtml(person.name)).join("、") || "未知人物"}</p>
+        <p>${escapeHtml(incident.date || "未填写日期")} · ${peopleForIncident(incident).map((person) => escapeHtml(person.name)).join("、") || "未知人物"} · ${Number(incident.viewCount || 0)} 次点击</p>
       </div>
     </a>
   `;
+}
+
+function recordIncidentView(id) {
+  if (!id) return;
+  const incident = state.incidents.find((item) => item.id === id);
+  if (incident) {
+    incident.viewCount = Number(incident.viewCount || 0) + 1;
+    saveState();
+  }
+  if (!serverAvailable) return;
+  const url = `/api/incidents/${encodeURIComponent(id)}/view`;
+  if (navigator.sendBeacon) {
+    navigator.sendBeacon(url, new Blob(["{}"], { type: "application/json" }));
+    return;
+  }
+  fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+    keepalive: true
+  }).catch(() => {});
 }
 
 function renderStats() {
@@ -667,7 +691,11 @@ function renderPeoplePage() {
 function bindCardNavigation() {
   document.addEventListener("click", (event) => {
     const link = event.target.closest("a");
-    if (link) return;
+    if (link) {
+      const incidentLink = link.closest("[data-incident-view]");
+      if (incidentLink) recordIncidentView(incidentLink.dataset.incidentView);
+      return;
+    }
     const card = event.target.closest("[data-href]");
     if (card) location.href = card.dataset.href;
   });

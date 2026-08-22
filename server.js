@@ -332,6 +332,9 @@ async function normalizeIncident(input, existing = {}) {
     result: input.result || "",
     pinned: !!input.pinned,
     recommended: !!input.recommended,
+    viewCount: Number.isFinite(Number(input.viewCount ?? existing.viewCount))
+      ? Math.max(0, Number(input.viewCount ?? existing.viewCount))
+      : 0,
     credibility: input.credibility || existing.credibility || "unverified",
     createdAt: existing.createdAt || input.createdAt || now,
     updatedAt: now,
@@ -547,6 +550,16 @@ async function handleApi(req, res) {
     });
     writeDb(db);
     return sendJson(res, 200, { ...incident, pending: false });
+  }
+
+  if (req.method === "POST" && url.pathname.startsWith("/api/incidents/") && url.pathname.endsWith("/view")) {
+    const id = decodeURIComponent(url.pathname.slice("/api/incidents/".length, -"/view".length));
+    const incident = db.incidents.find((item) => item.id === id);
+    if (!incident) return sendJson(res, 404, { error: "事件不存在" });
+    incident.viewCount = Number(incident.viewCount || 0) + 1;
+    incident.updatedAt = incident.updatedAt || new Date().toISOString();
+    writeDb(db);
+    return sendJson(res, 200, { ok: true, viewCount: incident.viewCount });
   }
 
   if (req.method === "PUT" && url.pathname.startsWith("/api/incidents/")) {
