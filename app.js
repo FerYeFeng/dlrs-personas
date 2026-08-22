@@ -48,6 +48,8 @@ function loadState() {
     parsed.incidents = parsed.incidents.map((incident) => ({
       images: [],
       result: "",
+      pinned: false,
+      recommended: false,
       personIds: incident.personIds || [incident.personId].filter(Boolean),
       ...incident
     }));
@@ -498,6 +500,7 @@ function incidentItem(incident) {
     <article class="timeline-item" data-incident-id="${escapeHtml(incident.id)}">
       <div class="timeline-head">
         <h3>${escapeHtml(incident.title)}</h3>
+        <div class="incident-flags">${incidentFlags(incident)}</div>
         ${isAdmin() ? `
           <a class="a edit-link" href="./edit-incident.html?id=${encodeURIComponent(incident.id)}">编辑</a>
           <button class="text-danger delete-incident-button" type="button" data-delete-incident="${escapeHtml(incident.id)}">删除</button>
@@ -514,16 +517,20 @@ function incidentItem(incident) {
 
 function getSortedPeople() {
   return [...state.people].sort((a, b) => {
-    const bScore = incidentsForPerson(b.id).length;
-    const aScore = incidentsForPerson(a.id).length;
-    return bScore - aScore || (b.updatedAt || b.createdAt || "").localeCompare(a.updatedAt || a.createdAt || "");
+    return comparePersonNames(a, b);
   });
+}
+
+function comparePersonNames(a, b) {
+  const nameA = (a.name || "").trim();
+  const nameB = (b.name || "").trim();
+  return nameA.localeCompare(nameB, "zh-Hans-CN", { sensitivity: "base", numeric: true })
+    || (a.id || "").localeCompare(b.id || "");
 }
 
 function filterPeople(keyword) {
   const q = keyword.trim().toLowerCase();
-  if (!q) return state.people;
-  return state.people.filter((person) => {
+  const people = !q ? state.people : state.people.filter((person) => {
     const text = [
       person.name,
       person.tags?.join(" "),
@@ -537,6 +544,7 @@ function filterPeople(keyword) {
     ].join(" ").toLowerCase();
     return text.includes(q);
   });
+  return [...people].sort(comparePersonNames);
 }
 
 function incidentSearchText(incident) {
@@ -562,19 +570,38 @@ function incidentSearchText(incident) {
 function filterIncidents(keyword, source = state.incidents) {
   const q = keyword.trim().toLowerCase();
   return [...source]
-    .sort((a, b) => (b.date || "").localeCompare(a.date || ""))
+    .sort(compareIncidents)
     .filter((incident) => !q || incidentSearchText(incident).includes(q));
+}
+
+function compareIncidents(a, b) {
+  return Number(!!b.pinned) - Number(!!a.pinned)
+    || (b.date || "").localeCompare(a.date || "")
+    || (b.updatedAt || b.createdAt || "").localeCompare(a.updatedAt || a.createdAt || "");
 }
 
 function sortHotIncidents(incidents) {
   return [...incidents].sort((a, b) => {
-    const score = incidentPersonIds(b).length - incidentPersonIds(a).length;
+    const score = Number(!!b.pinned) - Number(!!a.pinned)
+      || incidentPersonIds(b).length - incidentPersonIds(a).length;
     return score || (b.updatedAt || b.date || "").localeCompare(a.updatedAt || a.date || "");
   });
 }
 
 function sortRecentIncidents(incidents) {
-  return [...incidents].sort((a, b) => (b.updatedAt || b.createdAt || b.date || "").localeCompare(a.updatedAt || a.createdAt || a.date || ""));
+  return [...incidents].sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned)
+    || (b.updatedAt || b.createdAt || b.date || "").localeCompare(a.updatedAt || a.createdAt || a.date || ""));
+}
+
+function sortRecommendedIncidents(incidents) {
+  return [...incidents].filter((incident) => incident.recommended).sort(compareIncidents);
+}
+
+function incidentFlags(incident) {
+  return [
+    incident.pinned && `<span class="tag flag pinned">置顶</span>`,
+    incident.recommended && `<span class="tag flag recommended">推荐</span>`
+  ].filter(Boolean).join("");
 }
 
 function homeIncidentCard(incident) {
@@ -583,6 +610,7 @@ function homeIncidentCard(incident) {
     <a class="recent-card" href="${firstPerson ? `./person.html?id=${encodeURIComponent(firstPerson.id)}` : "./incidents.html"}">
       <div class="recent-cover">${incidentCoverTiles(incident)}</div>
       <div class="recent-body">
+        <div class="incident-flags">${incidentFlags(incident)}</div>
         <h3>${escapeHtml(incident.title)}</h3>
         <p>${escapeHtml(incident.date || "未填写日期")} · ${peopleForIncident(incident).map((person) => escapeHtml(person.name)).join("、") || "未知人物"}</p>
       </div>
@@ -602,14 +630,17 @@ function renderStats() {
 }
 
 function renderHome() {
+  const recommendedGrid = $("#recommendedGrid");
   const hotGrid = $("#hotGrid");
   const recentGrid = $("#recentGrid");
   const input = $("#homeSearchInput");
-  if (recentGrid || hotGrid) {
+  if (recentGrid || hotGrid || recommendedGrid) {
     const render = () => {
       const incidents = filterIncidents(input?.value || "");
+      const recommended = sortRecommendedIncidents(incidents).slice(0, 6);
       const hot = sortHotIncidents(incidents).slice(0, 6);
       const recent = sortRecentIncidents(incidents).slice(0, 6);
+      if (recommendedGrid) recommendedGrid.innerHTML = recommended.length ? recommended.map(homeIncidentCard).join("") : `<div class="empty">暂无推荐事件</div>`;
       if (hotGrid) hotGrid.innerHTML = hot.length ? hot.map(homeIncidentCard).join("") : `<div class="empty">暂无热门事件</div>`;
       if (recentGrid) recentGrid.innerHTML = recent.length ? recent.map(homeIncidentCard).join("") : `<div class="empty">暂无最近更新</div>`;
     };
@@ -674,14 +705,15 @@ function renderIncidentPersonPicker(selectedIds = []) {
   if (!picker) return;
   const name = picker.dataset.name || "personIds";
   const selected = new Set(selectedIds.filter(Boolean));
-  const selectedPeople = state.people.filter((person) => selected.has(person.id));
+  const sortedPeople = getSortedPeople();
+  const selectedPeople = sortedPeople.filter((person) => selected.has(person.id));
   picker.innerHTML = `
     <button class="person-picker__button" type="button" aria-expanded="false">
       <span>${selectedPeople.length ? selectedPeople.map((person) => escapeHtml(person.name)).join("、") : "选择关联人物"}</span>
       <i class="material-icons">expand_more</i>
     </button>
     <div class="person-picker__menu">
-      ${state.people.length ? state.people.map((person) => `
+      ${sortedPeople.length ? sortedPeople.map((person) => `
         <label class="person-picker__option">
           <input type="checkbox" value="${escapeHtml(person.id)}" ${selected.has(person.id) ? "checked" : ""} />
           <span>${escapeHtml(person.name)}</span>
@@ -800,6 +832,8 @@ function fillIncidentForm(form, incident) {
   const editor = $("#incidentEditor");
   if (editor) editor.innerHTML = legacyIncidentHtml(incident);
   form.elements.result.value = incident.result || "";
+  if (form.elements.pinned) form.elements.pinned.checked = !!incident.pinned;
+  if (form.elements.recommended) form.elements.recommended.checked = !!incident.recommended;
 }
 
 let savedEditorRange = null;
@@ -1184,6 +1218,8 @@ function bindIncidentForm() {
         contentHtml,
         images: [],
         result: data.get("result").trim(),
+        pinned: isAdmin() && data.get("pinned") === "on",
+        recommended: isAdmin() && data.get("recommended") === "on",
         credibility: editingIncident?.credibility || "unverified",
         createdAt: editingIncident?.createdAt || new Date().toISOString()
       };
@@ -1236,7 +1272,7 @@ function renderPersonDetail() {
   }
   document.title = `${person.name} - DLRS 人物志`;
   const accounts = person.accounts || {};
-  const incidents = incidentsForPerson(person.id).sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  const incidents = incidentsForPerson(person.id).sort(compareIncidents);
   root.innerHTML = `
     <section class="space-head br8">
       <div class="space-banner"${imageStyle(person.banner || "./uploads/default-banner.jpg")}></div>
@@ -1365,7 +1401,7 @@ function reviewIncidentSummary(payload) {
     <div class="review-detail">
       <div class="review-title-row">
         <h4>${escapeHtml(payload.title || "未命名事件")}</h4>
-        <span class="tag pending">待审核</span>
+        <div class="incident-flags"><span class="tag pending">待审核</span>${incidentFlags(payload)}</div>
       </div>
       <div class="review-fields">
         ${reviewField("发生日期", payload.date || "未填写日期")}

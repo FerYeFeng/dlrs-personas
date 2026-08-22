@@ -140,7 +140,8 @@ html.nav-open-initial .main > .mdui-container {
 }
 .nav a.active i { color: var(--accent-soft); }
 body.is-logged-in .nav a[href="./login.html"] { display: none; }
-body:not(.is-admin) [data-admin-link] { display: none; }
+body:not(.is-admin) [data-admin-link],
+body:not(.is-admin) .admin-only { display: none; }
 
 .drawer-note {
   margin: 16px;
@@ -493,6 +494,9 @@ body.theme-light .dialog .person-banner {
   bottom: 8px;
 }
 .recent-body { padding: 12px; }
+.recent-body .incident-flags {
+  margin-bottom: 7px;
+}
 .recent-body h3 {
   margin: 0 0 6px;
   font-size: 18px;
@@ -592,6 +596,20 @@ body.theme-light .dialog .person-banner {
   background: #fff3;
   font-size: 12px;
   line-height: 1.4;
+}
+.incident-flags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.tag.flag {
+  flex: 0 0 auto;
+}
+.tag.flag.pinned { background: #d93025; }
+.tag.flag.recommended {
+  color: #101010;
+  background: #ffc107;
 }
 .account-pill.qq { background: #d93025; }
 .account-pill.bilibili { background: #fb7299; }
@@ -1105,6 +1123,67 @@ textarea { resize: vertical; }
 }
 .form-row.single {
   grid-template-columns: minmax(0, 1fr);
+}
+.switch-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+.form-panel .switch-row {
+  min-height: 64px;
+  margin-top: 0;
+  padding: 12px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 2px solid var(--line);
+  border-radius: 6px;
+  background: var(--field);
+}
+.switch-row span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.switch-row b {
+  color: var(--white);
+  font-size: 14px;
+  font-weight: 500;
+}
+.switch-row small {
+  color: var(--gray);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.switch-row input {
+  width: 42px;
+  height: 22px;
+  flex: 0 0 auto;
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  padding: 0;
+  background: #555;
+  cursor: pointer;
+}
+.switch-row input::before {
+  content: "";
+  width: 18px;
+  height: 18px;
+  margin: 2px;
+  display: block;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform .18s ease;
+}
+.switch-row input:checked {
+  background: var(--accent);
+}
+.switch-row input:checked::before {
+  transform: translateX(20px);
 }
 .primary-button {
   width: 100%;
@@ -1663,6 +1742,7 @@ body.theme-light .space-banner {
   .rule-grid,
   .action-grid,
   .form-row,
+  .switch-grid,
   .upload-grid {
     grid-template-columns: 1fr;
     gap: 8px;

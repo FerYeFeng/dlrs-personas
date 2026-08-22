@@ -330,6 +330,8 @@ async function normalizeIncident(input, existing = {}) {
     evidence: input.evidence || "",
     images: [...baseImages, ...newImages],
     result: input.result || "",
+    pinned: !!input.pinned,
+    recommended: !!input.recommended,
     credibility: input.credibility || existing.credibility || "unverified",
     createdAt: existing.createdAt || input.createdAt || now,
     updatedAt: now,
@@ -521,6 +523,8 @@ async function handleApi(req, res) {
     const input = await readJson(req);
     if (!validateDateValue(input.date)) return sendJson(res, 400, { error: "日期年份必须是四位数" });
     if (!isAdminRole(user)) {
+      input.pinned = false;
+      input.recommended = false;
       let incident = await normalizeIncident(input);
       incident = stampCreate(incident, user);
       const submission = newSubmission("incident", incident, user);
