@@ -956,6 +956,14 @@ textarea { resize: vertical; }
   border-color: var(--accent);
   background: rgba(68,138,255,.14);
 }
+.editor-context-menu button.active {
+  border-color: var(--accent);
+  color: #fff;
+  background: var(--accent);
+}
+.editor-context-menu button.active:hover {
+  background: #2f7df0;
+}
 .editor-context-menu i {
   font-size: 20px;
 }

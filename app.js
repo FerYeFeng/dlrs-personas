@@ -1090,6 +1090,19 @@ function shouldKeepFreshEditorContextMenu() {
   return Date.now() - editorContextMenuOpenAt < 220;
 }
 
+function updateEditorContextMenuState(editor, menu) {
+  ["bold", "italic", "underline"].forEach((command) => {
+    const button = menu.querySelector(`[data-format-command="${command}"]`);
+    if (button) button.classList.toggle("active", document.queryCommandState(command));
+  });
+  const linkButton = menu.querySelector("[data-format-link]");
+  const selection = getSelection();
+  const node = selection.rangeCount ? selection.anchorNode : null;
+  const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+  const anchor = element?.closest?.("a");
+  linkButton?.classList.toggle("active", !!(anchor && editor.contains(anchor)));
+}
+
 function showEditorContextMenu(editor, event) {
   event.stopPropagation();
   hideEditorContextMenu();
@@ -1128,6 +1141,7 @@ function showEditorContextMenu(editor, event) {
     </div>
   `;
   document.body.appendChild(menu);
+  if (!isImage) updateEditorContextMenuState(editor, menu);
   const left = Math.min(event.clientX, innerWidth - menu.offsetWidth - 10);
   const top = Math.min(event.clientY, innerHeight - menu.offsetHeight - 10);
   menu.style.left = `${Math.max(10, left)}px`;
@@ -1147,14 +1161,19 @@ function showEditorContextMenu(editor, event) {
     const fontApplyButton = clickEvent.target.closest("[data-font-size-apply]");
     const stepButton = clickEvent.target.closest("[data-image-step]");
     const linkButton = clickEvent.target.closest("[data-format-link]");
-    if (commandButton) applyEditorCommand(editor, commandButton.dataset.formatCommand);
+    if (commandButton) {
+      applyEditorCommand(editor, commandButton.dataset.formatCommand);
+      updateEditorContextMenuState(editor, menu);
+    }
     if (fontApplyButton) {
       const input = menu.querySelector("[data-font-size-input]");
       applyEditorFontSize(editor, input?.value || "");
+      updateEditorContextMenuState(editor, menu);
     }
     if (linkButton) {
       const href = prompt("输入链接地址");
       if (href) applyEditorLink(editor, href);
+      updateEditorContextMenuState(editor, menu);
     }
     if (stepButton) {
       shiftEditorImageWidth(editor, Number(stepButton.dataset.imageStep));
@@ -1162,7 +1181,6 @@ function showEditorContextMenu(editor, event) {
       const input = menu.querySelector("[data-image-width]");
       if (input) input.value = editorImageWidthValue(currentImage);
     }
-    if (!stepButton && !fontApplyButton) hideEditorContextMenu();
   });
   menu.querySelector("[data-image-width]")?.addEventListener("change", (inputEvent) => {
     applyEditorImageWidth(editor, inputEvent.target.value);
