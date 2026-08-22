@@ -544,17 +544,18 @@ function personCard(person) {
 }
 
 function incidentItem(incident) {
+  const people = peopleForIncident(incident);
   return `
     <article class="timeline-item" data-incident-id="${escapeHtml(incident.id)}">
       <div class="timeline-head">
         <h3><a class="a incident-title-link" data-incident-view="${escapeHtml(incident.id)}" href="./incident.html?id=${encodeURIComponent(incident.id)}">${escapeHtml(incident.title)}</a></h3>
         <div class="incident-flags">${incidentFlags(incident)}</div>
-        ${isAdmin() ? `
+      ${isAdmin() ? `
           <a class="a edit-link" href="./edit-incident.html?id=${encodeURIComponent(incident.id)}">编辑</a>
           <button class="text-danger delete-incident-button" type="button" data-delete-incident="${escapeHtml(incident.id)}">删除</button>
         ` : ""}
       </div>
-      <p>${escapeHtml(incident.date || "未填写日期")} · ${escapeHtml(incident.category || "未标注")} · ${incidentPeopleLinks(incident)}</p>
+      <p>${escapeHtml(incident.date || "未填写日期")} · ${escapeHtml(incident.category || "未标注")} · 相关人物：${people.length ? people.map((person) => `<a class="a" href="./person.html?id=${encodeURIComponent(person.id)}">${escapeHtml(person.name)}</a>`).join("、") : "未知人物"}</p>
       ${auditMeta(incident)}
       <div class="incident-content">${legacyIncidentHtml(incident) || `<p>暂无描述</p>`}</div>
       ${incident.result ? `<p><b>处理结果：</b>${escapeHtml(incident.result)}</p>` : ""}
@@ -657,13 +658,14 @@ function incidentFlags(incident) {
 }
 
 function homeIncidentCard(incident) {
+  const people = peopleForIncident(incident);
   return `
     <a class="recent-card" data-incident-view="${escapeHtml(incident.id)}" href="./incident.html?id=${encodeURIComponent(incident.id)}">
       <div class="recent-cover">${incidentCoverTiles(incident)}</div>
       <div class="recent-body">
         <div class="incident-flags">${incidentFlags(incident)}</div>
         <h3>${escapeHtml(incident.title)}</h3>
-        <p>${escapeHtml(incident.date || "未填写日期")} · ${peopleForIncident(incident).map((person) => escapeHtml(person.name)).join("、") || "未知人物"} · ${Number(incident.viewCount || 0)} 次点击</p>
+        <p>${escapeHtml(incident.date || "未填写日期")} · 相关人物：${people.length ? people.map((person) => escapeHtml(person.name)).join("、") : "未知人物"} · ${Number(incident.viewCount || 0)} 次点击</p>
       </div>
     </a>
   `;
@@ -690,7 +692,7 @@ function renderIncidentDetail() {
         ` : ""}
       </div>
       <p class="muted">${escapeHtml(incident.date || "未填写日期")} · ${escapeHtml(incident.category || "未标注")} · ${Number(incident.viewCount || 0)} 次点击</p>
-      <div class="tags">${peopleForIncident(incident).map((person) => `<a class="tag" href="./person.html?id=${encodeURIComponent(person.id)}">${escapeHtml(person.name)}</a>`).join("") || `<span class="muted">未关联人物</span>`}</div>
+      <div class="tags"><span class="muted">相关人物：</span>${peopleForIncident(incident).map((person) => `<a class="tag" href="./person.html?id=${encodeURIComponent(person.id)}">${escapeHtml(person.name)}</a>`).join("") || `<span class="muted">未关联人物</span>`}</div>
       ${auditMeta(incident)}
       <div class="incident-content incident-detail-content">${legacyIncidentHtml(incident) || `<p>暂无描述</p>`}</div>
       ${incident.result ? `<p class="incident-result"><b>处理结果：</b>${escapeHtml(incident.result)}</p>` : ""}
