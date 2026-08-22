@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>登录 - DLRS 人物志</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons" />
+    <script src="./nav-state.js"></script>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body class="theme-dark">
+    <aside class="drawer">
+      <div class="brand"><div class="brand-mark">DL</div><div><strong>DLRS 人物志</strong><span>社区档案库</span></div></div>
+      <nav class="nav">
+        <a href="./index.html"><i class="material-icons">home</i><span>首页</span></a>
+        <a href="./people.html"><i class="material-icons">people</i><span>人物档案</span></a>
+        <a href="./incidents.html"><i class="material-icons">view_list</i><span>事件记录</span></a>
+        <a href="./add-person.html"><i class="material-icons">person_add</i><span>添加人物</span></a>
+        <a href="./add-incident.html"><i class="material-icons">post_add</i><span>添加事件</span></a>
+        <a href="./settings.html"><i class="material-icons">settings</i><span>设置</span></a>
+        <a href="./login.html"><i class="material-icons">login</i><span>登录</span></a>
+      </nav>
+    </aside>
+    <main class="main">
+      <header class="topbar">
+        <button id="menuButton" class="icon-button"><i class="material-icons">menu</i></button>
+        <div class="top-logo"><b>登录</b></div>
+      </header>
+      <div class="mdui-container py32">
+        <section class="section first-section form-page box2 br8">
+          <form id="loginForm" class="form-panel">
+            <div class="panel-title app-title"><h2>登录</h2><span>添加用户<a data-qq-link="2331457236" href="#">2331457236</a>发送小菲DLRS人物志注册。</span></div>
+            <label>QQ 号<input name="qq" autocomplete="username" /></label>
+            <label>密码<input name="password" type="password" autocomplete="current-password" /></label>
+            <p id="loginMessage" class="form-message"></p>
+            <button class="primary-button" type="submit">登录</button>
+          </form>
+        </section>
+      </div>
+    </main>
+    <script src="./app.js"></script>
+  </body>
+</html>
+
+
+

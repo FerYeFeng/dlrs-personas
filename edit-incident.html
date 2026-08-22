@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>编辑事件 - DLRS 人物志</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons" />
+    <script src="./nav-state.js"></script>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body class="theme-dark">
+    <aside class="drawer">
+      <div class="brand"><div class="brand-mark">DL</div><div><strong>DLRS 人物志</strong><span>社区档案库</span></div></div>
+      <nav class="nav">
+        <a href="./index.html"><i class="material-icons">home</i><span>首页</span></a>
+        <a href="./people.html"><i class="material-icons">people</i><span>人物档案</span></a>
+        <a href="./incidents.html"><i class="material-icons">view_list</i><span>事件记录</span></a>
+        <a href="./add-person.html"><i class="material-icons">person_add</i><span>添加人物</span></a>
+        <a href="./add-incident.html"><i class="material-icons">post_add</i><span>添加事件</span></a>
+        <a href="./settings.html"><i class="material-icons">settings</i><span>设置</span></a>
+        <a href="./login.html"><i class="material-icons">login</i><span>登录</span></a>
+      </nav>
+    </aside>
+    <main class="main">
+      <header class="topbar"><button id="menuButton" class="icon-button"><i class="material-icons">menu</i></button><div class="top-logo"><b>编辑事件</b></div></header>
+      <div class="mdui-container py32">
+        <section class="section first-section form-page box2 br8">
+          <form id="incidentForm" class="form-panel">
+            <div class="panel-title app-title"><h2>编辑事件</h2><span>事件正文</span></div>
+            <div class="picker-label">
+              <span>关联人物</span>
+              <div id="incidentPersonPicker" class="person-picker" data-name="personIds"></div>
+            </div>
+            <label>事件标题<input name="title" /></label>
+            <div class="form-row two"><label>日期<input name="date" type="date" min="1000-01-01" max="9999-12-31" /></label><label>事件类型<input name="category" placeholder="例如：抄袭争议 / 交易纠纷 / 澄清" /></label></div>
+            <div class="editor-label">
+              <span>事件正文</span>
+              <div class="editor-shell">
+                <div class="editor-toolbar">
+                  <button type="button" data-editor-command="bold"><i class="material-icons">format_bold</i></button>
+                  <button type="button" data-editor-command="insertUnorderedList"><i class="material-icons">format_list_bulleted</i></button>
+                  <button type="button" data-editor-image><i class="material-icons">add_photo_alternate</i></button>
+                  <input id="incidentEditorImage" type="file" accept="image/*" multiple />
+                </div>
+                <div id="incidentEditor" class="rich-editor" contenteditable="true" data-placeholder="填写事件经过、相关材料、链接；图片可直接拖入正文"></div>
+              </div>
+            </div>
+            <label>处理结果<input name="result" /></label>
+            <button class="primary-button" type="submit">保存修改</button>
+          </form>
+        </section>
+      </div>
+    </main>
+    <script src="./app.js"></script>
+  </body>
+</html>
+
+
+
+
+

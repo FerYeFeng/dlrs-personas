@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>添加人物 - DLRS 人物志</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons" />
+    <script src="./nav-state.js"></script>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body class="theme-dark">
+    <aside class="drawer">
+      <div class="brand"><div class="brand-mark">DL</div><div><strong>DLRS 人物志</strong><span>社区档案库</span></div></div>
+      <nav class="nav">
+        <a href="./index.html"><i class="material-icons">home</i><span>首页</span></a>
+        <a href="./people.html"><i class="material-icons">people</i><span>人物档案</span></a>
+        <a href="./incidents.html"><i class="material-icons">view_list</i><span>事件记录</span></a>
+        <a href="./add-person.html"><i class="material-icons">person_add</i><span>添加人物</span></a>
+        <a href="./add-incident.html"><i class="material-icons">post_add</i><span>添加事件</span></a>
+        <a href="./settings.html"><i class="material-icons">settings</i><span>设置</span></a>
+        <a href="./login.html"><i class="material-icons">login</i><span>登录</span></a>
+      </nav>
+    </aside>
+    <main class="main">
+      <header class="topbar"><button id="menuButton" class="icon-button"><i class="material-icons">menu</i></button><div class="top-logo"><b>添加人物</b></div></header>
+      <div class="mdui-container py32">
+        <section class="section first-section form-page box2 br8">
+          <form id="personForm" class="form-panel">
+            <div class="panel-title app-title"><h2>添加人物</h2><span>基础资料与平台账号</span></div>
+            <div class="upload-grid">
+              <label class="upload-card"><input name="avatar" type="file" accept="image/*" /><i class="material-icons">add_photo_alternate</i><b>头像</b><span data-empty="拖入图片或点击选择">拖入图片或点击选择</span></label>
+              <label class="upload-card"><input name="banner" type="file" accept="image/*" /><i class="material-icons">panorama</i><b>横幅图</b><span data-empty="拖入图片或点击选择">拖入图片或点击选择</span></label>
+            </div>
+            <label>昵称<input name="name" placeholder="例如：某某作者" /></label>
+            <div class="form-row four"><label>QQ<input name="qq" inputmode="numeric" pattern="[0-9]*" placeholder="纯数字 QQ 号" /></label><label>Bilibili<input name="bilibili" type="url" placeholder="https://space.bilibili.com/..." /></label><label>抖音<input name="douyin" type="url" placeholder="https://www.douyin.com/..." /></label><label>GAS<input name="gas" placeholder="GAS UID" /></label></div>
+            <label>身份标签<input name="tags" placeholder="关卡作者, UP主, 争议人物" /></label>
+            <div class="editor-label">
+              <span>简介</span>
+              <div class="editor-shell">
+                <div class="editor-toolbar">
+                  <button type="button" data-editor-command="bold"><i class="material-icons">format_bold</i></button>
+                  <button type="button" data-editor-command="insertUnorderedList"><i class="material-icons">format_list_bulleted</i></button>
+                  <button type="button" data-editor-image><i class="material-icons">add_photo_alternate</i></button>
+                  <input id="personBioEditorImage" type="file" accept="image/*" multiple />
+                </div>
+                <div id="personBioEditor" class="rich-editor compact" contenteditable="true" data-placeholder="填写人物简介、代表作品、公开身份等信息；图片可直接拖入正文"></div>
+              </div>
+            </div>
+            <div class="form-row single"><label>人物类型<input name="status" placeholder="例如：关卡作者 / UP主 / 管理员 / 争议人物" /></label></div>
+            <button class="primary-button" type="submit">保存人物</button>
+          </form>
+        </section>
+      </div>
+    </main>
+    <script src="./app.js"></script>
+  </body>
+</html>
+
+
+
+
+
