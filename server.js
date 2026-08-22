@@ -10,6 +10,9 @@ const dbPath = path.join(dataDir, "db.json");
 const port = Number(process.env.PORT || 9000);
 const sessionMaxAge = 1000 * 60 * 60 * 24 * 7;
 const passwordIterations = 120000;
+const gasSeedUsers = [
+  { uid: "5194", nickname: "Fer叶枫" }
+];
 
 fs.mkdirSync(dataDir, { recursive: true });
 fs.mkdirSync(uploadDir, { recursive: true });
@@ -38,6 +41,7 @@ function readDb() {
   db.users ||= [];
   db.sessions ||= {};
   db.submissions ||= [];
+  db.gasUsers ||= [];
   return db;
 }
 
@@ -253,6 +257,37 @@ async function getGasSpace(uid) {
   return payload?.code === 200 ? gasUserFromSpace(uid, payload) : null;
 }
 
+function normalizeGasKeyword(value = "") {
+  return String(value).trim().toLowerCase().replace(/\s+/g, "");
+}
+
+function mergeGasUserCache(db, user) {
+  if (!user?.uid) return false;
+  db.gasUsers ||= [];
+  const index = db.gasUsers.findIndex((item) => String(item.uid) === String(user.uid));
+  const next = { ...user, updatedAt: new Date().toISOString() };
+  if (index >= 0) {
+    db.gasUsers[index] = { ...db.gasUsers[index], ...next };
+  } else {
+    db.gasUsers.unshift(next);
+  }
+  return true;
+}
+
+function cachedGasMatches(db, keyword) {
+  const q = normalizeGasKeyword(keyword);
+  const pool = [...(db.gasUsers || []), ...gasSeedUsers];
+  const seen = new Set();
+  return pool.filter((item) => {
+    const uid = String(item.uid || "");
+    const nickname = String(item.nickname || "");
+    if (!uid || seen.has(uid)) return false;
+    const matched = normalizeGasKeyword(uid).includes(q) || normalizeGasKeyword(nickname).includes(q);
+    if (matched) seen.add(uid);
+    return matched;
+  });
+}
+
 function decodeDuckDuckGoUrl(value) {
   try {
     const parsed = new URL(value, "https://duckduckgo.com");
@@ -263,16 +298,20 @@ function decodeDuckDuckGoUrl(value) {
   }
 }
 
-async function searchGasUsers(keyword) {
+async function searchGasUsers(keyword, db) {
   const query = String(keyword || "").trim();
   if (!query) return [];
-  const results = [];
+  const results = [...cachedGasMatches(db, query)];
+  if (results.length) return results.slice(0, 12);
   const seen = new Set();
+  results.forEach((item) => seen.add(String(item.uid)));
   const addUid = async (uid) => {
     if (!/^\d+$/.test(uid) || seen.has(uid) || seen.size >= 12) return;
     seen.add(uid);
     const user = await getGasSpace(uid);
-    if (user && (query === uid || user.nickname.toLowerCase().includes(query.toLowerCase()))) results.push(user);
+    if (!user) return;
+    mergeGasUserCache(db, user);
+    if (query === uid || normalizeGasKeyword(user.nickname).includes(normalizeGasKeyword(query))) results.push(user);
   };
 
   if (/^\d+$/.test(query)) await addUid(query);
@@ -485,7 +524,9 @@ async function handleApi(req, res) {
   if (req.method === "GET" && url.pathname === "/api/gas/search") {
     const q = String(url.searchParams.get("q") || "").trim();
     if (!q) return sendJson(res, 200, { results: [] });
-    const results = await searchGasUsers(q).catch(() => []);
+    const before = JSON.stringify(db.gasUsers || []);
+    const results = await searchGasUsers(q, db).catch(() => []);
+    if (JSON.stringify(db.gasUsers || []) !== before) writeDb(db);
     return sendJson(res, 200, { results });
   }
 
