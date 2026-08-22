@@ -876,7 +876,8 @@ textarea { resize: vertical; }
   border-bottom: 1px solid var(--line);
   background: rgba(255,255,255,.04);
 }
-.editor-toolbar button {
+.editor-toolbar button,
+.editor-toolbar select {
   width: 34px;
   height: 30px;
   display: inline-grid;
@@ -887,7 +888,13 @@ textarea { resize: vertical; }
   background: #202020;
   cursor: pointer;
 }
-.editor-toolbar button:hover {
+.editor-toolbar select {
+  width: auto;
+  min-width: 78px;
+  padding: 0 8px;
+}
+.editor-toolbar button:hover,
+.editor-toolbar select:hover {
   border-color: var(--accent);
   background: rgba(68,138,255,.14);
 }
@@ -921,12 +928,22 @@ textarea { resize: vertical; }
 .rich-editor img,
 .incident-content img {
   display: block;
-  max-width: min(100%, 760px);
-  max-height: 720px;
+  max-width: min(100%, 520px);
+  max-height: 420px;
   margin: 14px 0;
   border-radius: 6px;
   object-fit: contain;
   background: #111;
+}
+.rich-editor img[data-image-size="small"],
+.incident-content img[data-image-size="small"] {
+  max-width: min(100%, 320px);
+  max-height: 280px;
+}
+.rich-editor img[data-image-size="large"],
+.incident-content img[data-image-size="large"] {
+  max-width: min(100%, 760px);
+  max-height: 620px;
 }
 .rich-editor blockquote,
 .incident-content blockquote {
@@ -941,9 +958,33 @@ textarea { resize: vertical; }
   overflow-wrap: anywhere;
   line-height: 1.8;
 }
+.incident-detail {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 26px;
+}
+.incident-detail h1 {
+  flex: 1;
+  margin: 0;
+  font-size: 30px;
+  font-weight: 500;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.incident-detail-content {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.incident-result {
+  margin-top: 18px;
+  padding: 12px 14px;
+  border-radius: 6px;
+  background: rgba(255,255,255,.05);
+}
 .person-bio-content img {
-  max-width: min(100%, 680px);
-  max-height: 520px;
+  max-width: min(100%, 520px);
+  max-height: 420px;
 }
 .upload-grid {
   display: grid;

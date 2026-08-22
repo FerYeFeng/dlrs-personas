@@ -148,10 +148,19 @@ function isAllowedImageSrc(src = "") {
   return src.startsWith("data:image/") || src.startsWith("/uploads/") || src.startsWith("./uploads/") || /^https?:\/\//i.test(src);
 }
 
+function sanitizeFontSize(value = "") {
+  const size = String(value).trim();
+  return /^(13|14|16|18|20|24|28)px$/.test(size) ? size : "";
+}
+
+function sanitizeImageSize(value = "") {
+  return ["small", "medium", "large"].includes(value) ? value : "";
+}
+
 function sanitizeRichHtml(html = "") {
   const template = document.createElement("template");
   template.innerHTML = String(html);
-  const allowed = new Set(["P", "DIV", "BR", "B", "STRONG", "I", "EM", "U", "UL", "OL", "LI", "BLOCKQUOTE", "A", "IMG"]);
+  const allowed = new Set(["P", "DIV", "BR", "B", "STRONG", "I", "EM", "U", "UL", "OL", "LI", "BLOCKQUOTE", "A", "IMG", "SPAN"]);
   const walk = (node) => {
     [...node.childNodes].forEach((child) => {
       if (child.nodeType === Node.ELEMENT_NODE) {
@@ -162,6 +171,8 @@ function sanitizeRichHtml(html = "") {
         }
         const href = child.getAttribute("href") || "";
         const src = child.getAttribute("src") || "";
+        const fontSize = sanitizeFontSize(child.style?.fontSize || "");
+        const imageSize = sanitizeImageSize(child.dataset?.imageSize || "");
         [...child.attributes].forEach((attr) => child.removeAttribute(attr.name));
         if (child.tagName === "A") {
           if (/^https?:\/\//i.test(href)) {
@@ -170,10 +181,14 @@ function sanitizeRichHtml(html = "") {
             child.setAttribute("rel", "noopener");
           }
         }
+        if (child.tagName === "SPAN" && fontSize) {
+          child.style.fontSize = fontSize;
+        }
         if (child.tagName === "IMG") {
           if (isAllowedImageSrc(src)) {
             child.setAttribute("src", src);
             child.setAttribute("alt", "事件图片");
+            if (imageSize) child.dataset.imageSize = imageSize;
           } else {
             child.remove();
             return;
@@ -500,7 +515,7 @@ function incidentItem(incident) {
   return `
     <article class="timeline-item" data-incident-id="${escapeHtml(incident.id)}">
       <div class="timeline-head">
-        <h3>${escapeHtml(incident.title)}</h3>
+        <h3><a class="a incident-title-link" data-incident-view="${escapeHtml(incident.id)}" href="./incident.html?id=${encodeURIComponent(incident.id)}">${escapeHtml(incident.title)}</a></h3>
         <div class="incident-flags">${incidentFlags(incident)}</div>
         ${isAdmin() ? `
           <a class="a edit-link" href="./edit-incident.html?id=${encodeURIComponent(incident.id)}">编辑</a>
@@ -610,9 +625,8 @@ function incidentFlags(incident) {
 }
 
 function homeIncidentCard(incident) {
-  const firstPerson = peopleForIncident(incident)[0];
   return `
-    <a class="recent-card" data-incident-view="${escapeHtml(incident.id)}" href="${firstPerson ? `./person.html?id=${encodeURIComponent(firstPerson.id)}` : "./incidents.html"}">
+    <a class="recent-card" data-incident-view="${escapeHtml(incident.id)}" href="./incident.html?id=${encodeURIComponent(incident.id)}">
       <div class="recent-cover">${incidentCoverTiles(incident)}</div>
       <div class="recent-body">
         <div class="incident-flags">${incidentFlags(incident)}</div>
@@ -621,6 +635,37 @@ function homeIncidentCard(incident) {
       </div>
     </a>
   `;
+}
+
+function renderIncidentDetail() {
+  const root = $("#incidentDetail");
+  if (!root) return;
+  const id = new URLSearchParams(location.search).get("id");
+  const incident = state.incidents.find((item) => item.id === id);
+  if (!incident) {
+    root.innerHTML = `<div class="empty">事件不存在</div>`;
+    return;
+  }
+  document.title = `${incident.title} - DLRS 人物志`;
+  root.innerHTML = `
+    <section class="section first-section incident-detail box2 br8" data-incident-id="${escapeHtml(incident.id)}">
+      <div class="timeline-head">
+        <h1>${escapeHtml(incident.title)}</h1>
+        <div class="incident-flags">${incidentFlags(incident)}</div>
+        ${isAdmin() ? `
+          <a class="a edit-link" href="./edit-incident.html?id=${encodeURIComponent(incident.id)}">编辑</a>
+          <button class="text-danger delete-incident-button" type="button" data-delete-incident="${escapeHtml(incident.id)}">删除</button>
+        ` : ""}
+      </div>
+      <p class="muted">${escapeHtml(incident.date || "未填写日期")} · ${escapeHtml(incident.category || "未标注")} · ${Number(incident.viewCount || 0)} 次点击</p>
+      <div class="tags">${peopleForIncident(incident).map((person) => `<a class="tag" href="./person.html?id=${encodeURIComponent(person.id)}">${escapeHtml(person.name)}</a>`).join("") || `<span class="muted">未关联人物</span>`}</div>
+      ${auditMeta(incident)}
+      <div class="incident-content incident-detail-content">${legacyIncidentHtml(incident) || `<p>暂无描述</p>`}</div>
+      ${incident.result ? `<p class="incident-result"><b>处理结果：</b>${escapeHtml(incident.result)}</p>` : ""}
+      ${historyList(incident)}
+    </section>
+  `;
+  bindDeleteButtons();
 }
 
 function recordIncidentView(id) {
@@ -900,6 +945,41 @@ function insertEditorHtmlAtRange(editor, html, range) {
   insertEditorHtml(editor, html);
 }
 
+function applyEditorFontSize(editor, size) {
+  const safeSize = sanitizeFontSize(size);
+  if (!safeSize) return;
+  restoreEditorSelection(editor);
+  const selection = getSelection();
+  if (!selection.rangeCount || selection.isCollapsed) return;
+  const range = selection.getRangeAt(0);
+  const span = document.createElement("span");
+  span.style.fontSize = safeSize;
+  try {
+    range.surroundContents(span);
+  } catch {
+    span.appendChild(range.extractContents());
+    range.insertNode(span);
+  }
+  selection.removeAllRanges();
+  const nextRange = document.createRange();
+  nextRange.selectNodeContents(span);
+  nextRange.collapse(false);
+  selection.addRange(nextRange);
+  saveEditorSelection(editor);
+}
+
+function applyEditorImageSize(editor, size) {
+  const safeSize = sanitizeImageSize(size);
+  if (!safeSize) return;
+  const selection = getSelection();
+  const node = selection.rangeCount ? selection.anchorNode : null;
+  const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+  const image = element?.closest?.("img");
+  if (image && editor.contains(image)) {
+    image.dataset.imageSize = safeSize;
+  }
+}
+
 function currentEditorRange(editor) {
   const selection = getSelection();
   return selection.rangeCount && editor.contains(selection.anchorNode)
@@ -907,9 +987,10 @@ function currentEditorRange(editor) {
     : savedEditorRange?.cloneRange() || null;
 }
 
-async function insertEditorImages(editor, files) {
+async function insertEditorImages(editor, files, size = "medium") {
   const images = await readImageFiles(files, 1600);
-  const html = images.filter(Boolean).map((image) => `<p><img src="${image}" alt="事件图片"></p>`).join("");
+  const safeSize = sanitizeImageSize(size) || "medium";
+  const html = images.filter(Boolean).map((image) => `<p><img src="${image}" alt="事件图片" data-image-size="${safeSize}"></p>`).join("");
   if (html) insertEditorHtml(editor, html);
 }
 
@@ -926,21 +1007,25 @@ async function importRemoteEditorImage(src) {
   }
 }
 
-async function importPastedHtml(html = "") {
+async function importPastedHtml(html = "", imageSize = "medium") {
   const template = document.createElement("template");
   template.innerHTML = html;
   const images = [...template.content.querySelectorAll("img")];
+  const safeSize = sanitizeImageSize(imageSize) || "medium";
   for (const image of images) {
     const src = image.getAttribute("src") || "";
     if (/^https?:\/\//i.test(src)) {
       const local = await importRemoteEditorImage(src);
       if (local) {
         image.setAttribute("src", local);
+        image.dataset.imageSize = safeSize;
       } else {
         const link = document.createElement("p");
         link.textContent = src;
         image.replaceWith(link);
       }
+    } else if (isAllowedImageSrc(src)) {
+      image.dataset.imageSize = safeSize;
     }
   }
   return sanitizeRichHtml(template.innerHTML);
@@ -951,8 +1036,19 @@ function bindRichEditor(editorSelector, fileInputSelector) {
   if (!editor) return;
   const shell = editor.closest(".editor-shell") || document;
   const fileInput = $(fileInputSelector);
+  const fontSizeSelect = shell.querySelector("[data-editor-font-size]");
+  const imageSizeSelect = shell.querySelector("[data-editor-image-size]");
   ["keyup", "mouseup", "focus", "input"].forEach((type) => {
     editor.addEventListener(type, () => saveEditorSelection(editor));
+  });
+  editor.addEventListener("click", (event) => {
+    if (event.target?.tagName !== "IMG") return;
+    const range = document.createRange();
+    range.selectNode(event.target);
+    const selection = getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    saveEditorSelection(editor);
   });
   [...shell.querySelectorAll("[data-editor-command]")].forEach((button) => {
     button.addEventListener("mousedown", (event) => event.preventDefault());
@@ -970,8 +1066,15 @@ function bindRichEditor(editorSelector, fileInputSelector) {
     fileInput?.click();
   });
   fileInput?.addEventListener("change", async () => {
-    await insertEditorImages(editor, fileInput.files || []);
+    await insertEditorImages(editor, fileInput.files || [], imageSizeSelect?.value || "medium");
     fileInput.value = "";
+  });
+  fontSizeSelect?.addEventListener("change", () => {
+    applyEditorFontSize(editor, fontSizeSelect.value);
+    fontSizeSelect.value = "";
+  });
+  imageSizeSelect?.addEventListener("change", () => {
+    applyEditorImageSize(editor, imageSizeSelect.value);
   });
   ["dragenter", "dragover"].forEach((type) => {
     editor.addEventListener(type, (event) => {
@@ -989,7 +1092,7 @@ function bindRichEditor(editorSelector, fileInputSelector) {
     const files = [...event.dataTransfer.files].filter((file) => file.type.startsWith("image/"));
     if (files.length) {
       saveEditorSelection(editor);
-      await insertEditorImages(editor, files);
+      await insertEditorImages(editor, files, imageSizeSelect?.value || "medium");
     }
   });
   editor.addEventListener("paste", async (event) => {
@@ -1001,14 +1104,15 @@ function bindRichEditor(editorSelector, fileInputSelector) {
     if (files.length) {
       event.preventDefault();
       const images = await readImageFiles(files, 1600);
-      const imageHtml = images.filter(Boolean).map((image) => `<p><img src="${image}" alt="事件图片"></p>`).join("");
+      const safeSize = sanitizeImageSize(imageSizeSelect?.value || "medium") || "medium";
+      const imageHtml = images.filter(Boolean).map((image) => `<p><img src="${image}" alt="事件图片" data-image-size="${safeSize}"></p>`).join("");
       if (imageHtml) insertEditorHtmlAtRange(editor, imageHtml, pasteRange);
       return;
     }
     const html = event.clipboardData?.getData("text/html") || "";
     if (html.trim()) {
       event.preventDefault();
-      const pasted = await importPastedHtml(html);
+      const pasted = await importPastedHtml(html, imageSizeSelect?.value || "medium");
       insertEditorHtmlAtRange(editor, pasted || plainTextToHtml(event.clipboardData?.getData("text/plain") || ""), pasteRange);
       return;
     }
@@ -1017,7 +1121,7 @@ function bindRichEditor(editorSelector, fileInputSelector) {
       event.preventDefault();
       const local = await importRemoteEditorImage(text.trim());
       insertEditorHtmlAtRange(editor, local
-        ? `<p><img src="${local}" alt="事件图片"></p>`
+        ? `<p><img src="${local}" alt="事件图片" data-image-size="${sanitizeImageSize(imageSizeSelect?.value || "medium") || "medium"}"></p>`
         : `<p>${escapeHtml(text.trim())}</p>`, pasteRange);
     }
   });
@@ -1790,7 +1894,7 @@ function bindMenu() {
     const href = link.getAttribute("href") || "";
     const active = href.endsWith(current)
       || (current === "edit-person.html" && href.endsWith("people.html"))
-      || (current === "edit-incident.html" && href.endsWith("incidents.html"))
+      || ((current === "edit-incident.html" || current === "incident.html") && href.endsWith("incidents.html"))
       || (current === "users.html" && href.endsWith("users.html"));
     link.classList.toggle("active", active);
   });
@@ -1800,7 +1904,7 @@ function mobileTabItems() {
   return [
     { href: "./index.html", icon: "home", label: "首页", match: ["index.html", ""] },
     { href: "./people.html", icon: "people", label: "人物", match: ["people.html", "person.html", "edit-person.html"] },
-    { href: "./incidents.html", icon: "view_list", label: "事件", match: ["incidents.html", "edit-incident.html"] },
+    { href: "./incidents.html", icon: "view_list", label: "事件", match: ["incidents.html", "incident.html", "edit-incident.html"] },
     { href: "./add.html", icon: "add_circle", label: "添加", match: ["add.html", "add-person.html", "add-incident.html"] },
     { href: "./settings.html", icon: "person", label: "我的", match: ["settings.html", "users.html"] }
   ];
@@ -1839,6 +1943,7 @@ async function init() {
   bindPersonForm();
   bindIncidentForm();
   renderPersonDetail();
+  renderIncidentDetail();
   bindProtectedLinks();
   bindLoginForm();
   bindPasswordForm();
