@@ -218,6 +218,83 @@ function validateAccounts(accounts = {}) {
   return "";
 }
 
+async function fetchJson(url, headers = {}) {
+  const response = await fetch(url, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 DLRS-Personas/1.0",
+      "Accept": "application/json,text/plain,*/*",
+      ...headers
+    }
+  });
+  if (!response.ok) return null;
+  return response.json().catch(() => null);
+}
+
+function gasUserFromSpace(uid, payload) {
+  const data = payload?.data || {};
+  const nickname = String(data.nickname || data.name || "").trim();
+  if (!nickname) return null;
+  return {
+    uid: String(uid),
+    nickname,
+    avatar: String(data.avatar || "").trim(),
+    vType: data.v_type || 0,
+    vInfo: data.v_info || "",
+    url: `https://chinadlrs.com/space/${encodeURIComponent(String(uid))}`
+  };
+}
+
+async function getGasSpace(uid) {
+  if (!/^\d+$/.test(String(uid || ""))) return null;
+  const payload = await fetchJson(`https://api.chinadlrs.com/v1/user/get-space.php?uid=${encodeURIComponent(String(uid))}`, {
+    "Origin": "https://chinadlrs.com",
+    "Referer": `https://chinadlrs.com/space/${encodeURIComponent(String(uid))}`
+  });
+  return payload?.code === 200 ? gasUserFromSpace(uid, payload) : null;
+}
+
+function decodeDuckDuckGoUrl(value) {
+  try {
+    const parsed = new URL(value, "https://duckduckgo.com");
+    const redirect = parsed.searchParams.get("uddg");
+    return redirect ? decodeURIComponent(redirect) : parsed.href;
+  } catch {
+    return value;
+  }
+}
+
+async function searchGasUsers(keyword) {
+  const query = String(keyword || "").trim();
+  if (!query) return [];
+  const results = [];
+  const seen = new Set();
+  const addUid = async (uid) => {
+    if (!/^\d+$/.test(uid) || seen.has(uid) || seen.size >= 12) return;
+    seen.add(uid);
+    const user = await getGasSpace(uid);
+    if (user && (query === uid || user.nickname.toLowerCase().includes(query.toLowerCase()))) results.push(user);
+  };
+
+  if (/^\d+$/.test(query)) await addUid(query);
+
+  const searchUrl = `https://duckduckgo.com/html/?q=${encodeURIComponent(`site:chinadlrs.com/space/ ${query}`)}`;
+  const response = await fetch(searchUrl, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 DLRS-Personas/1.0",
+      "Accept": "text/html,*/*",
+      "Referer": "https://duckduckgo.com/"
+    }
+  }).catch(() => null);
+  const html = response?.ok ? await response.text() : "";
+  const uidMatches = [...html.matchAll(/href="([^"]*chinadlrs\.com\/space\/(\d+)[^"]*)"/gi)];
+  for (const match of uidMatches) {
+    const decoded = decodeDuckDuckGoUrl(match[1]);
+    const uid = decoded.match(/chinadlrs\.com\/space\/(\d+)/i)?.[1] || match[2];
+    await addUid(uid);
+  }
+  return results;
+}
+
 function validateDateValue(value) {
   return !value || /^\d{4}-\d{2}-\d{2}$/.test(String(value));
 }
@@ -403,6 +480,13 @@ async function handleApi(req, res) {
     const me = getSessionUser(req, db);
     if (dirtySession) writeDb(db);
     return sendJson(res, 200, { me: publicUser(me) });
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/gas/search") {
+    const q = String(url.searchParams.get("q") || "").trim();
+    if (!q) return sendJson(res, 200, { results: [] });
+    const results = await searchGasUsers(q).catch(() => []);
+    return sendJson(res, 200, { results });
   }
 
   if (req.method === "POST" && url.pathname === "/api/auth/login") {

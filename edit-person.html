@@ -33,6 +33,13 @@
             </div>
             <label>昵称<input name="name" placeholder="例如：某某作者" /></label>
             <div class="form-row four"><label>QQ<input name="qq" inputmode="numeric" pattern="[0-9]*" placeholder="纯数字 QQ 号" /></label><label>Bilibili<input name="bilibili" type="url" placeholder="https://space.bilibili.com/..." /></label><label>抖音<input name="douyin" type="url" placeholder="https://www.douyin.com/..." /></label><label>GAS<input name="gas" placeholder="GAS UID" /></label></div>
+            <div class="gas-search" data-gas-search>
+              <div class="gas-search__bar">
+                <input data-gas-query placeholder="输入 GAS 昵称或 UID 搜索" />
+                <button type="button" data-gas-search-button><i class="material-icons">search</i><span>搜索</span></button>
+              </div>
+              <div class="gas-search__results" data-gas-results></div>
+            </div>
             <label class="tag-input-label">身份标签
               <div class="tag-input" data-tag-input>
                 <div class="tag-input__list" data-tag-list></div>

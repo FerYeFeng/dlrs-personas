@@ -1443,6 +1443,65 @@ function bindUploadCards() {
   });
 }
 
+function renderGasSearchResults(root, results = [], message = "") {
+  const list = root?.querySelector("[data-gas-results]");
+  if (!list) return;
+  if (message) {
+    list.innerHTML = `<div class="gas-search__message">${escapeHtml(message)}</div>`;
+    return;
+  }
+  list.innerHTML = results.length ? results.map((item) => `
+    <button type="button" class="gas-result" data-gas-uid="${escapeHtml(item.uid)}">
+      <span class="gas-result__avatar">${item.avatar ? `<img src="${escapeHtml(item.avatar)}" alt="${escapeHtml(item.nickname)}头像" />` : escapeHtml(String(item.nickname || item.uid).slice(0, 1))}</span>
+      <span class="gas-result__body">
+        <b>${escapeHtml(item.nickname || "未命名用户")}</b>
+        <small>UID ${escapeHtml(item.uid)}${item.vInfo ? ` · ${escapeHtml(item.vInfo)}` : ""}</small>
+      </span>
+      <span class="gas-result__use">使用</span>
+    </button>
+  `).join("") : `<div class="gas-search__message">没有找到 GAS 用户</div>`;
+}
+
+function bindGasSearch(form) {
+  const root = form.querySelector("[data-gas-search]");
+  const gasInput = form.elements.gas;
+  if (!root || !gasInput || root.dataset.bound === "1") return;
+  root.dataset.bound = "1";
+  const queryInput = root.querySelector("[data-gas-query]");
+  const button = root.querySelector("[data-gas-search-button]");
+  const runSearch = async () => {
+    const keyword = queryInput.value.trim();
+    if (!keyword) {
+      renderGasSearchResults(root, [], "请输入 GAS 昵称或 UID");
+      return;
+    }
+    button.disabled = true;
+    renderGasSearchResults(root, [], "正在搜索...");
+    try {
+      const data = await apiRequest(`/api/gas/search?q=${encodeURIComponent(keyword)}`);
+      renderGasSearchResults(root, data.results || []);
+    } catch (error) {
+      renderGasSearchResults(root, [], error.message || "搜索失败");
+    } finally {
+      button.disabled = false;
+    }
+  };
+  button.addEventListener("click", runSearch);
+  queryInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      runSearch();
+    }
+  });
+  root.addEventListener("click", (event) => {
+    const item = event.target.closest("[data-gas-uid]");
+    if (!item) return;
+    gasInput.value = item.dataset.gasUid || "";
+    root.querySelectorAll(".gas-result.selected").forEach((node) => node.classList.remove("selected"));
+    item.classList.add("selected");
+  });
+}
+
 function bindPersonForm() {
   const form = $("#personForm");
   if (!form) return;
@@ -1458,6 +1517,7 @@ function bindPersonForm() {
   }
   bindPersonBioEditor();
   bindTagInput(form);
+  bindGasSearch(form);
   if (editingPerson) fillPersonForm(form, editingPerson);
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
