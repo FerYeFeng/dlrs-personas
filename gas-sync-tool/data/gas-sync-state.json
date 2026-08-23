@@ -1,12 +1,12 @@
 {
-  "currentUid": 9421,
-  "nextUid": 9422,
-  "startUid": 1141,
-  "endUid": 75000,
-  "checked": 8281,
-  "total": 73860,
-  "cached": 5535,
-  "foundThisRun": 4690,
+  "currentUid": 78040,
+  "nextUid": 78041,
+  "startUid": 75001,
+  "endUid": 80000,
+  "checked": 3040,
+  "total": 5000,
+  "cached": 47943,
+  "foundThisRun": 2808,
   "status": "running",
-  "updatedAt": "2026-08-22T16:59:32.174837+08:00"
+  "updatedAt": "2026-08-23T01:10:14.926211+08:00"
 }

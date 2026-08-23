@@ -2,6 +2,7 @@ const STORAGE_KEY = "dlrs-personas-v2";
 const LEGACY_KEY = "dlrs-personas-v1";
 const THEME_KEY = "dlrs-personas-theme";
 const NAV_KEY = "dlrs-nav-open";
+const SCROLL_KEY_PREFIX = "dlrs-scroll:";
 
 const demoData = {
   people: [],
@@ -12,6 +13,10 @@ const demoData = {
 let state = loadState();
 let serverAvailable = false;
 let currentUser = null;
+
+if ("scrollRestoration" in history) {
+  history.scrollRestoration = "manual";
+}
 
 function $(selector) {
   return document.querySelector(selector);
@@ -51,6 +56,9 @@ function loadState() {
       pinned: false,
       recommended: false,
       viewCount: 0,
+      comments: [],
+      likeCount: 0,
+      liked: false,
       personIds: incident.personIds || [incident.personId].filter(Boolean),
       ...incident
     }));
@@ -116,6 +124,23 @@ function createId() {
     ? crypto.getRandomValues(new Uint32Array(2)).join("")
     : Math.random().toString(36).slice(2);
   return `id-${Date.now().toString(36)}-${random}`;
+}
+
+function scrollStorageKey() {
+  return `${SCROLL_KEY_PREFIX}${location.pathname}${location.search}`;
+}
+
+function saveScrollPosition() {
+  sessionStorage.setItem(scrollStorageKey(), String(window.scrollY || 0));
+}
+
+function restoreScrollPosition() {
+  if (location.hash) return;
+  const saved = Number(sessionStorage.getItem(scrollStorageKey()) || 0);
+  if (!saved) return;
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => window.scrollTo({ top: saved, left: 0, behavior: "auto" }));
+  });
 }
 
 function readImageFile(file, maxWidth = 1400, quality = 0.84) {
@@ -270,6 +295,31 @@ function incidentPlainText(incident) {
   return richTextToPlainText(html);
 }
 
+function incidentSummary(incident, maxLength = 88) {
+  const text = incidentPlainText(incident).replace(/\s+/g, " ").trim();
+  if (!text) return "暂无描述";
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+}
+
+function smartTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  const target = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  if (target.getTime() === yesterday.getTime()) return "昨天";
+  if (target.getTime() !== today.getTime()) {
+    return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+  }
+  const diff = now.getTime() - date.getTime();
+  if (diff >= 0 && diff < 60 * 1000) return "刚刚";
+  if (diff >= 0 && diff < 60 * 60 * 1000) return `${Math.max(1, Math.floor(diff / 60000))}分钟前`;
+  if (diff >= 0) return `${Math.max(1, Math.floor(diff / 3600000))}小时前`;
+  return "刚刚";
+}
+
 function incidentCoverImage(incident) {
   const person = peopleForIncident(incident)[0];
   return person?.avatar || person?.banner || "";
@@ -300,7 +350,7 @@ function userName(qq) {
 
 function userLink(qq) {
   const label = escapeHtml(userName(qq));
-  return qq ? `<a class="a" href="${qqProfileLink(qq)}">${label}</a>` : label;
+  return qq ? `<a class="a" href="${qqFallbackLink(qq)}" data-qq-open="${escapeHtml(qq)}">${label}</a>` : label;
 }
 
 function auditMeta(record) {
@@ -331,6 +381,9 @@ function applyTheme(theme) {
   document.body.classList.toggle("theme-dark", !isLight);
   const toggle = $("#themeToggle");
   if (toggle) toggle.checked = isLight;
+  $all(".hero-title-image").forEach((image) => {
+    image.src = isLight ? (image.dataset.lightSrc || image.src) : (image.dataset.darkSrc || image.src);
+  });
 }
 
 function isAdmin() {
@@ -339,6 +392,10 @@ function isAdmin() {
 
 function isSuperAdmin() {
   return currentUser?.role === "superadmin";
+}
+
+function canDeleteIncident(incident) {
+  return isAdmin() || !!incident.canDelete;
 }
 
 function roleText(role) {
@@ -453,6 +510,11 @@ function qqProfileLink(qq) {
   return `tencent://ntqq-open?subCmd=profile&action=openMiniBuddyProfile&actionParams=${actionParams}`;
 }
 
+function qqFallbackLink(qq) {
+  const uin = String(qq || "").trim();
+  return `tencent://message/?uin=${encodeURIComponent(uin)}&Site=qq&Menu=yes`;
+}
+
 function isMobileDevice() {
   return /Android|iPhone|iPad|iPod|Mobile|HarmonyOS/i.test(navigator.userAgent || "");
 }
@@ -517,7 +579,7 @@ function incidentsForPerson(id) {
 function accountPills(person) {
   const accounts = person.accounts || {};
   return [
-    accounts.qq && `<a class="account-pill qq" href="${qqProfileLink(accounts.qq)}">QQ ${escapeHtml(accounts.qq)}</a>`,
+    accounts.qq && `<a class="account-pill qq" href="${qqFallbackLink(accounts.qq)}" data-qq-open="${escapeHtml(accounts.qq)}">QQ ${escapeHtml(accounts.qq)}</a>`,
     accounts.bilibili && `<a class="account-pill bilibili" href="${escapeHtml(accounts.bilibili)}" target="_blank" rel="noopener">Bilibili</a>`,
     accounts.douyin && `<a class="account-pill douyin" href="${escapeHtml(accounts.douyin)}" target="_blank" rel="noopener">抖音</a>`,
     accounts.gas && `<a class="account-pill gas" href="${gasProfileLink(accounts.gas)}" target="_blank" rel="noopener">GAS</a>`
@@ -528,7 +590,7 @@ function personCard(person) {
   const incidentCount = incidentsForPerson(person.id).length;
   return `
     <article class="person-card" data-href="./person.html?id=${encodeURIComponent(person.id)}" tabindex="0">
-      <div class="person-banner person-card-avatar"${imageStyle(person.avatar)}>${person.avatar ? "" : escapeHtml(person.name.slice(0, 1))}</div>
+      <div class="person-banner person-card-avatar">${person.avatar ? `<img src="${escapeHtml(person.avatar)}" alt="${escapeHtml(person.name)}头像" />` : escapeHtml(person.name.slice(0, 1))}</div>
       <div class="person-body">
         <h3>${escapeHtml(person.name)}</h3>
         <div class="muted">${escapeHtml(statusText(person.status))} · ${incidentCount} 条事件</div>
@@ -552,15 +614,92 @@ function incidentItem(incident) {
         <div class="incident-flags">${incidentFlags(incident)}</div>
       ${isAdmin() ? `
           <a class="a edit-link" href="./edit-incident.html?id=${encodeURIComponent(incident.id)}">编辑</a>
+        ` : ""}
+        ${canDeleteIncident(incident) ? `
           <button class="text-danger delete-incident-button" type="button" data-delete-incident="${escapeHtml(incident.id)}">删除</button>
         ` : ""}
       </div>
       <p>${escapeHtml(incident.date || "未填写日期")} · ${escapeHtml(incident.category || "未标注")} · 相关人物：${people.length ? people.map((person) => `<a class="a" href="./person.html?id=${encodeURIComponent(person.id)}">${escapeHtml(person.name)}</a>`).join("、") : "未知人物"}</p>
       ${auditMeta(incident)}
-      <div class="incident-content">${legacyIncidentHtml(incident) || `<p>暂无描述</p>`}</div>
+      <p class="incident-summary">${escapeHtml(incidentSummary(incident))}</p>
+      <div class="incident-actions">
+        <a class="a detail-link" data-incident-view="${escapeHtml(incident.id)}" href="./incident.html?id=${encodeURIComponent(incident.id)}">查看完整事件</a>
+        <button class="inline-action ${incident.liked ? "active" : ""}" type="button" data-like-incident="${escapeHtml(incident.id)}"><i class="material-icons">thumb_up</i><span>${Number(incident.likeCount || 0)}</span></button>
+        <button class="inline-action" type="button" data-share-incident="${escapeHtml(incident.id)}"><i class="material-icons">share</i><span>分享</span></button>
+      </div>
       ${incident.result ? `<p><b>处理结果：</b>${escapeHtml(incident.result)}</p>` : ""}
       ${historyList(incident)}
     </article>
+  `;
+}
+
+function commentAuthor(comment) {
+  return comment.authorName || "已登录用户";
+}
+
+function renderReplyItems(incident, comment, replies) {
+  if (!replies.length) return "";
+  return `
+    <div class="reply-list is-collapsed" data-reply-list="${escapeHtml(comment.id)}">
+      <div class="reply-box">
+        ${replies.map((reply) => renderCommentItem(incident, reply, true)).join("")}
+      </div>
+      <button class="inline-action reply-expand" type="button" data-toggle-replies="${escapeHtml(comment.id)}" data-count="${replies.length}">共 ${replies.length} 条评论</button>
+    </div>
+  `;
+}
+
+function renderCommentItem(incident, comment, isReply = false) {
+  const replies = Array.isArray(comment.replies) ? comment.replies : [];
+  return `
+    <article id="comment-${escapeHtml(comment.id)}" class="comment-item ${isReply ? "is-reply" : ""}" data-comment-id="${escapeHtml(comment.id)}">
+      <div class="comment-avatar">${comment.authorAvatar ? `<img src="${escapeHtml(comment.authorAvatar)}" alt="头像" />` : escapeHtml(commentAuthor(comment).slice(0, 1))}</div>
+      <div class="comment-body">
+        <div class="comment-meta">
+          <b>${escapeHtml(commentAuthor(comment))}</b>
+          <button class="comment-more-button" type="button" data-comment-menu="${escapeHtml(comment.id)}" aria-label="评论菜单"><i class="material-icons">more_horiz</i></button>
+        </div>
+        <p>${escapeHtml(comment.content || "")}</p>
+        <div class="comment-footer">
+          <div class="comment-footnote">${escapeHtml(smartTime(comment.createdAt))} · IP ${escapeHtml(comment.location || "未知地区")}</div>
+          <div class="comment-footer-actions">
+            ${currentUser && !isReply ? `<button class="inline-action" type="button" data-reply-comment="${escapeHtml(comment.id)}">回复</button>` : ""}
+            <button class="inline-action ${comment.liked ? "active" : ""}" type="button" data-like-comment="${escapeHtml(comment.id)}"><i class="material-icons">thumb_up</i><span>${Number(comment.likeCount || 0)}</span></button>
+          </div>
+        </div>
+        <div class="comment-menu" data-comment-menu-panel="${escapeHtml(comment.id)}">
+          <button type="button" data-share-comment="${escapeHtml(comment.id)}"><i class="material-icons">share</i><span>分享</span></button>
+          ${comment.canDelete ? `<button class="danger" type="button" data-delete-comment="${escapeHtml(comment.id)}"><i class="material-icons">delete</i><span>删除</span></button>` : ""}
+        </div>
+        ${!isReply ? renderReplyItems(incident, comment, replies) : ""}
+      </div>
+    </article>
+  `;
+}
+
+function renderComments(incident) {
+  const comments = Array.isArray(incident.comments) ? incident.comments : [];
+  return `
+    <section class="section comments-section box2 br8">
+      <div class="comments-head">
+        <h2>评论</h2>
+        <span class="muted">${comments.length} 条</span>
+      </div>
+      <div class="comment-list">
+        ${comments.length ? comments.map((comment) => renderCommentItem(incident, comment)).join("") : `<div class="empty small">暂无评论</div>`}
+      </div>
+      ${currentUser ? `
+        <form id="commentForm" class="comment-form">
+          <textarea name="content" rows="3" maxlength="1000" placeholder="写下评论"></textarea>
+          <div class="button-row">
+            <button class="primary-button" type="submit">发表评论</button>
+          </div>
+          <p id="commentMessage" class="form-message"></p>
+        </form>
+      ` : `
+        <div class="login-required">登录后才能评论。<a class="a" href="./login.html?next=${encodeURIComponent(`incident.html?id=${incident.id}`)}">去登录</a></div>
+      `}
+    </section>
   `;
 }
 
@@ -665,7 +804,7 @@ function homeIncidentCard(incident) {
       <div class="recent-body">
         <div class="incident-flags">${incidentFlags(incident)}</div>
         <h3>${escapeHtml(incident.title)}</h3>
-        <p>${escapeHtml(incident.date || "未填写日期")} · 相关人物：${people.length ? people.map((person) => escapeHtml(person.name)).join("、") : "未知人物"} · ${Number(incident.viewCount || 0)} 次点击</p>
+        <p>${escapeHtml(incident.date || "未填写日期")} · 相关人物：${people.length ? people.map((person) => escapeHtml(person.name)).join("、") : "未知人物"} · ${Number(incident.viewCount || 0)} 次点击 · ${Number(incident.likeCount || 0)} 赞</p>
       </div>
     </a>
   `;
@@ -688,18 +827,291 @@ function renderIncidentDetail() {
         <div class="incident-flags">${incidentFlags(incident)}</div>
         ${isAdmin() ? `
           <a class="a edit-link" href="./edit-incident.html?id=${encodeURIComponent(incident.id)}">编辑</a>
+        ` : ""}
+        ${canDeleteIncident(incident) ? `
           <button class="text-danger delete-incident-button" type="button" data-delete-incident="${escapeHtml(incident.id)}">删除</button>
         ` : ""}
       </div>
       <p class="muted">${escapeHtml(incident.date || "未填写日期")} · ${escapeHtml(incident.category || "未标注")} · ${Number(incident.viewCount || 0)} 次点击</p>
       <div class="tags"><span class="muted">相关人物：</span>${peopleForIncident(incident).map((person) => `<a class="tag" href="./person.html?id=${encodeURIComponent(person.id)}">${escapeHtml(person.name)}</a>`).join("") || `<span class="muted">未关联人物</span>`}</div>
+      <div class="incident-actions detail-actions">
+        <button class="inline-action ${incident.liked ? "active" : ""}" type="button" data-like-incident="${escapeHtml(incident.id)}"><i class="material-icons">thumb_up</i><span>${Number(incident.likeCount || 0)}</span></button>
+        <button class="inline-action" type="button" data-share-incident="${escapeHtml(incident.id)}"><i class="material-icons">share</i><span>分享</span></button>
+      </div>
       ${auditMeta(incident)}
       <div class="incident-content incident-detail-content">${legacyIncidentHtml(incident) || `<p>暂无描述</p>`}</div>
       ${incident.result ? `<p class="incident-result"><b>处理结果：</b>${escapeHtml(incident.result)}</p>` : ""}
       ${historyList(incident)}
     </section>
+    ${renderComments(incident)}
   `;
   bindDeleteButtons();
+  bindCommentForm(incident);
+  bindCommentActions(incident);
+  bindIncidentLikeButtons();
+  bindIncidentShareButtons();
+  scrollToSharedComment();
+}
+
+function bindCommentForm(incident) {
+  const form = $("#commentForm");
+  if (!form || !incident) return;
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const textarea = form.elements.content;
+    const message = $("#commentMessage");
+    const content = String(textarea.value || "").trim();
+    if (!content) {
+      if (message) message.textContent = "评论不能为空";
+      return;
+    }
+    form.querySelector("button[type='submit']").disabled = true;
+    try {
+      const result = await apiRequest(`/api/incidents/${encodeURIComponent(incident.id)}/comments`, {
+        method: "POST",
+        body: JSON.stringify({ content })
+      });
+      incident.comments ||= [];
+      incident.comments.push(result.comment);
+      textarea.value = "";
+      saveState();
+      renderIncidentDetail();
+    } catch (error) {
+      if (message) message.textContent = error.message;
+    } finally {
+      const button = form.querySelector("button[type='submit']");
+      if (button) button.disabled = false;
+    }
+  });
+}
+
+function findLocalComment(comments, id) {
+  for (const comment of comments || []) {
+    if (comment.id === id) return comment;
+    const found = findLocalComment(comment.replies || [], id);
+    if (found) return found;
+  }
+  return null;
+}
+
+function removeLocalComment(comments, id) {
+  const index = (comments || []).findIndex((comment) => comment.id === id);
+  if (index >= 0) {
+    comments.splice(index, 1);
+    return true;
+  }
+  return (comments || []).some((comment) => removeLocalComment(comment.replies || [], id));
+}
+
+async function shareUrl(url, message = "链接已复制") {
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: document.title, url });
+      return;
+    } catch (error) {
+      if (error.name === "AbortError") return;
+    }
+  }
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(url);
+      alert(message);
+      return;
+    }
+  } catch {}
+  const textarea = document.createElement("textarea");
+  textarea.value = url;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.top = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+  try {
+    if (document.execCommand("copy")) {
+      textarea.remove();
+      alert(message);
+      return;
+    }
+  } catch {}
+  textarea.remove();
+  const manual = prompt("复制链接", url);
+  if (manual !== null) {
+    alert(message);
+  }
+}
+
+async function shareComment(commentId) {
+  const url = `${location.origin}${location.pathname}${location.search}#comment-${encodeURIComponent(commentId)}`;
+  await shareUrl(url, "评论链接已复制");
+}
+
+async function shareIncident(incidentId) {
+  const url = `${location.origin}/incident.html?id=${encodeURIComponent(incidentId)}`;
+  await shareUrl(url, "事件链接已复制");
+}
+
+function scrollToSharedComment() {
+  if (!location.hash.startsWith("#comment-")) return;
+  const id = decodeURIComponent(location.hash.slice("#comment-".length));
+  const scroll = (smooth = true) => {
+    const item = document.getElementById(`comment-${id}`);
+    if (!item) return false;
+    const replyList = item.closest(".reply-list");
+    if (replyList?.classList.contains("is-collapsed")) {
+      replyList.classList.remove("is-collapsed");
+      const toggle = replyList.querySelector("[data-toggle-replies]");
+      if (toggle) toggle.textContent = "收起评论";
+    }
+    item.scrollIntoView({ block: "center", behavior: smooth ? "smooth" : "auto" });
+    item.classList.add("comment-highlight");
+    clearTimeout(item._highlightTimer);
+    item._highlightTimer = setTimeout(() => item.classList.remove("comment-highlight"), 2200);
+    return true;
+  };
+  requestAnimationFrame(() => requestAnimationFrame(() => scroll(true)));
+  [150, 500, 1200, 2200].forEach((delay) => setTimeout(() => scroll(false), delay));
+}
+
+async function toggleIncidentLike(incident) {
+  if (!currentUser) {
+    alert("请先登录后再使用该功能。");
+    redirectToLogin(`incident.html?id=${incident.id}`);
+    return;
+  }
+  const result = await apiRequest(`/api/incidents/${encodeURIComponent(incident.id)}/like`, { method: "POST" });
+  incident.liked = result.liked;
+  incident.likeCount = result.likeCount;
+  saveState();
+}
+
+async function toggleCommentLike(incident, commentId) {
+  if (!currentUser) {
+    alert("请先登录后再使用该功能。");
+    redirectToLogin(`incident.html?id=${incident.id}`);
+    return;
+  }
+  const result = await apiRequest(`/api/incidents/${encodeURIComponent(incident.id)}/comments/${encodeURIComponent(commentId)}/like`, { method: "POST" });
+  const comment = findLocalComment(incident.comments || [], commentId);
+  if (comment) {
+    comment.liked = result.liked;
+    comment.likeCount = result.likeCount;
+  }
+  saveState();
+}
+
+function showReplyForm(incident, commentId) {
+  const item = document.querySelector(`[data-comment-id="${CSS.escape(commentId)}"] .comment-body`);
+  if (!item || item.querySelector(".reply-form")) return;
+  item.insertAdjacentHTML("beforeend", `
+    <form class="reply-form" data-reply-form="${escapeHtml(commentId)}">
+      <textarea name="content" rows="2" maxlength="1000" placeholder="写下回复"></textarea>
+      <div class="button-row">
+        <button class="primary-button" type="submit">回复</button>
+        <button class="top-action" type="button" data-cancel-reply>取消</button>
+      </div>
+      <p class="form-message"></p>
+    </form>
+  `);
+  const form = item.querySelector(".reply-form");
+  form.querySelector("[data-cancel-reply]")?.addEventListener("click", () => form.remove());
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const content = String(form.elements.content.value || "").trim();
+    const message = form.querySelector(".form-message");
+    if (!content) {
+      message.textContent = "回复不能为空";
+      return;
+    }
+    try {
+      const result = await apiRequest(`/api/incidents/${encodeURIComponent(incident.id)}/comments/${encodeURIComponent(commentId)}/reply`, {
+        method: "POST",
+        body: JSON.stringify({ content })
+      });
+      const comment = findLocalComment(incident.comments || [], commentId);
+      if (comment) {
+        comment.replies ||= [];
+        comment.replies.push(result.reply);
+      }
+      saveState();
+      renderIncidentDetail();
+    } catch (error) {
+      message.textContent = error.message;
+    }
+  });
+}
+
+function bindCommentActions(incident) {
+  $all("[data-comment-menu]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const panel = document.querySelector(`[data-comment-menu-panel="${CSS.escape(button.dataset.commentMenu)}"]`);
+      $all(".comment-menu.open").forEach((menu) => {
+        if (menu !== panel) menu.classList.remove("open");
+      });
+      panel?.classList.toggle("open");
+    });
+  });
+  $all("[data-like-comment]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      try {
+        await toggleCommentLike(incident, button.dataset.likeComment);
+        renderIncidentDetail();
+      } catch (error) {
+        alert(error.message);
+      }
+    });
+  });
+  $all("[data-reply-comment]").forEach((button) => {
+    button.addEventListener("click", () => {
+      button.closest(".comment-menu")?.classList.remove("open");
+      showReplyForm(incident, button.dataset.replyComment);
+    });
+  });
+  $all("[data-share-comment]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      button.closest(".comment-menu")?.classList.remove("open");
+      try {
+        await shareComment(button.dataset.shareComment);
+      } catch (error) {
+        alert(error.message || "分享失败");
+      }
+    });
+  });
+  $all("[data-delete-comment]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      button.closest(".comment-menu")?.classList.remove("open");
+      if (!confirm("确认删除这条评论？")) return;
+      await apiRequest(`/api/incidents/${encodeURIComponent(incident.id)}/comments/${encodeURIComponent(button.dataset.deleteComment)}`, { method: "DELETE" });
+      removeLocalComment(incident.comments || [], button.dataset.deleteComment);
+      saveState();
+      renderIncidentDetail();
+    });
+  });
+  $all("[data-toggle-replies]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const list = button.closest(".reply-list");
+      if (!list) return;
+      const collapsed = list.classList.toggle("is-collapsed");
+      button.textContent = collapsed ? `共 ${button.dataset.count || 0} 条评论` : "收起评论";
+    });
+  });
+  bindCommentMenuDismiss();
+}
+
+function bindCommentMenuDismiss() {
+  if (document.body.dataset.commentMenuDismissBound === "1") return;
+  document.body.dataset.commentMenuDismissBound = "1";
+  document.addEventListener("click", (event) => {
+    if (event.target.closest(".comment-menu, [data-comment-menu]")) return;
+    $all(".comment-menu.open").forEach((menu) => menu.classList.remove("open"));
+  });
 }
 
 function recordIncidentView(id) {
@@ -748,6 +1160,8 @@ function renderHome() {
       if (pinnedGrid) pinnedGrid.innerHTML = pinned.length ? pinned.map(homeIncidentCard).join("") : `<div class="empty">暂无置顶事件</div>`;
       if (hotGrid) hotGrid.innerHTML = hot.length ? hot.map(homeIncidentCard).join("") : `<div class="empty">暂无热门事件</div>`;
       if (recentGrid) recentGrid.innerHTML = recent.length ? recent.map(homeIncidentCard).join("") : `<div class="empty">暂无最近更新</div>`;
+      bindIncidentLikeButtons();
+      bindIncidentShareButtons();
     };
     input?.addEventListener("input", render);
     render();
@@ -769,22 +1183,45 @@ function renderPeoplePage() {
 
 function bindCardNavigation() {
   document.addEventListener("click", (event) => {
+    const qqLink = event.target.closest("[data-qq-open]");
+    if (qqLink) {
+      event.preventDefault();
+      event.stopPropagation();
+      openQqProfile(qqLink.dataset.qqOpen);
+      return;
+    }
     const link = event.target.closest("a");
     if (link) {
+      saveScrollPosition();
       const incidentLink = link.closest("[data-incident-view]");
       if (incidentLink) recordIncidentView(incidentLink.dataset.incidentView);
       return;
     }
     const card = event.target.closest("[data-href]");
-    if (card) location.href = card.dataset.href;
+    if (card) {
+      saveScrollPosition();
+      location.href = card.dataset.href;
+    }
   });
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Enter" && event.key !== " ") return;
     const card = event.target.closest("[data-href]");
     if (!card) return;
     event.preventDefault();
+    saveScrollPosition();
     location.href = card.dataset.href;
   });
+}
+
+function openQqProfile(qq) {
+  const uin = String(qq || "").trim();
+  if (!uin) return;
+  location.href = qqProfileLink(uin);
+  if (!isMobileDevice()) {
+    setTimeout(() => {
+      location.href = qqFallbackLink(uin);
+    }, 700);
+  }
 }
 
 function renderIncidentsPage() {
@@ -796,6 +1233,8 @@ function renderIncidentsPage() {
     const incidents = filterIncidents(keyword);
     list.innerHTML = incidents.length ? incidents.map(incidentItem).join("") : `<div class="empty">暂无事件记录</div>`;
     bindDeleteButtons();
+    bindIncidentLikeButtons();
+    bindIncidentShareButtons();
   };
   input?.addEventListener("input", render);
   render();
@@ -1377,6 +1816,8 @@ document.addEventListener("click", (event) => {
 document.addEventListener("scroll", () => {
   if (!shouldKeepFreshEditorContextMenu()) hideEditorContextMenu();
 }, true);
+window.addEventListener("pagehide", saveScrollPosition);
+window.addEventListener("beforeunload", saveScrollPosition);
 
 function setUploadCardPreview(card, src = "") {
   if (!card) return;
@@ -1759,18 +2200,20 @@ function renderPersonDetail() {
     </section>
   `;
   bindDeleteButtons();
+  bindIncidentLikeButtons();
+  bindIncidentShareButtons();
 }
 
 function accountRow(label, value, className) {
   const href = className === "qq"
-    ? value ? qqProfileLink(value) : ""
+    ? value ? qqFallbackLink(value) : ""
     : className === "gas"
       ? value ? gasProfileLink(value) : ""
     : value || "";
   const shortValue = className === "bilibili" && value ? value.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "") : value;
   const sizeClass = String(shortValue || "").length > 42 ? " tiny" : String(shortValue || "").length > 24 ? " compact" : "";
   const link = href
-    ? `<a class="account-link${sizeClass}" href="${escapeHtml(href)}" title="${escapeHtml(value)}" ${className === "qq" || className === "gas" ? "" : 'target="_blank" rel="noopener"'}>${escapeHtml(shortValue || "打开")}</a>`
+    ? `<a class="account-link${sizeClass}" href="${escapeHtml(href)}" title="${escapeHtml(value)}" ${className === "qq" ? `data-qq-open="${escapeHtml(value)}"` : ""} ${className === "qq" || className === "gas" ? "" : 'target="_blank" rel="noopener"'}>${escapeHtml(shortValue || "打开")}</a>`
     : `<span class="account-empty">未收录</span>`;
   return `
     <div class="account-row">
@@ -1940,7 +2383,7 @@ function renderAccountPanel() {
           <p>${escapeHtml(currentUser.qq)} · ${escapeHtml(roleText(currentUser.role))}${currentUser.mustChangePassword ? " · 需要修改初始密码" : ""}</p>
         </div>
       </div>
-      <p><a class="a" href="${qqProfileLink(currentUser.qq)}">个人主页</a></p>
+      <p><a class="a" href="${qqFallbackLink(currentUser.qq)}" data-qq-open="${escapeHtml(currentUser.qq)}">个人主页</a></p>
       <div class="button-row">
         <a class="top-action" href="./change-password.html"><i class="material-icons">password</i>修改密码</a>
         ${isAdmin() ? `<a class="top-action" href="./admin.html"><i class="material-icons">verified_user</i>审核</a>` : ""}
@@ -2009,7 +2452,7 @@ async function renderAdminPage() {
         <div class="timeline-head">
           <h3>${item.type === "person" ? "人物提交" : "事件提交"}</h3>
           <span class="tag pending">待审核</span>
-          <span class="tag">QQ ${escapeHtml(item.submitterQq)}</span>
+          ${item.submitterQq ? `<span class="tag">QQ ${escapeHtml(item.submitterQq)}</span>` : ""}
         </div>
         <p>${escapeHtml(item.createdAt || "")}</p>
         ${submissionSummary(item)}
@@ -2048,7 +2491,7 @@ async function renderAdminUsers() {
           <div class="profile-head compact">
             <div class="profile-avatar small">${user.avatar ? `<img src="${escapeHtml(user.avatar)}" alt="头像" />` : escapeHtml((user.username || user.qq).slice(0, 1))}</div>
             <div>
-              <h3><a class="a" href="${qqProfileLink(user.qq)}">${escapeHtml(user.username || user.qq)}</a></h3>
+              <h3><a class="a" href="${qqFallbackLink(user.qq)}" data-qq-open="${escapeHtml(user.qq)}">${escapeHtml(user.username || user.qq)}</a></h3>
               <p>${escapeHtml(user.qq)}</p>
             </div>
           </div>
@@ -2147,7 +2590,8 @@ function bindProtectedLinks() {
 function bindQqLinks() {
   $all("[data-qq-link]").forEach((link) => {
     const qq = link.dataset.qqLink || link.textContent || "";
-    link.href = qqProfileLink(qq);
+    link.href = qqFallbackLink(qq);
+    link.dataset.qqOpen = qq;
   });
 }
 
@@ -2174,6 +2618,43 @@ function bindDeleteButtons() {
         if (item) item.remove();
       } catch (error) {
         alert(error.message);
+      }
+    });
+  });
+}
+
+function bindIncidentLikeButtons() {
+  $all("[data-like-incident]").forEach((button) => {
+    if (button.dataset.bound === "1") return;
+    button.dataset.bound = "1";
+    button.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const incident = state.incidents.find((item) => item.id === button.dataset.likeIncident);
+      if (!incident) return;
+      try {
+        await toggleIncidentLike(incident);
+        button.classList.toggle("active", !!incident.liked);
+        const count = button.querySelector("span");
+        if (count) count.textContent = Number(incident.likeCount || 0);
+      } catch (error) {
+        alert(error.message);
+      }
+    });
+  });
+}
+
+function bindIncidentShareButtons() {
+  $all("[data-share-incident]").forEach((button) => {
+    if (button.dataset.bound === "1") return;
+    button.dataset.bound = "1";
+    button.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      try {
+        await shareIncident(button.dataset.shareIncident);
+      } catch (error) {
+        alert(error.message || "分享失败");
       }
     });
   });
@@ -2243,6 +2724,8 @@ async function init() {
   renderPeoplePage();
   renderIncidentsPage();
   bindDeleteButtons();
+  bindIncidentLikeButtons();
+  bindIncidentShareButtons();
   bindPersonForm();
   bindIncidentForm();
   renderPersonDetail();
@@ -2253,6 +2736,7 @@ async function init() {
   await renderAdminPage();
   await renderAdminUsers();
   bindSettings();
+  restoreScrollPosition();
 }
 
 init();

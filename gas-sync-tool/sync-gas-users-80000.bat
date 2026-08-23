@@ -2,9 +2,10 @@
 setlocal
 set "TOOL_DIR=%~dp0"
 cd /d "%TOOL_DIR%"
-echo GAS sync start: UID 1 to 80000.
+echo GAS sync start: UID 11036 to 75000, single worker.
 echo Progress file: data\gas-sync-state.json
 echo Failed UID file: data\gas-sync-failed.txt
+echo Speed: 0.7s/request. 404 skips. 468 sleeps 5 minutes then retries.
 echo.
 
 set "PY_CMD="
@@ -26,7 +27,7 @@ if "%PY_CMD%"=="" (
 
 echo Using: %PY_CMD%
 echo.
-%PY_CMD% "%TOOL_DIR%sync-gas-users.py" --start 1140 --end 75000 --resume --retries 3 --save-every 100 --status-every 1 --delay-ms 1000
+%PY_CMD% "%TOOL_DIR%sync-gas-users.py" --start 11036 --end 75000 --resume --retries 1 --save-every 50 --status-every 1 --delay-ms 700 --block-wait-minutes 5
 
 if errorlevel 1 (
   echo.

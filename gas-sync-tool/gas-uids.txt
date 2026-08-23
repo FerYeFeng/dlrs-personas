@@ -1,4 +1,0 @@
-# Put known GAS UIDs here, one per line.
-# This low-request sync will query only these UIDs plus UIDs already used in db.json.
-5194
-5690

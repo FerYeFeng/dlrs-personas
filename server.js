@@ -7,12 +7,17 @@ const root = __dirname;
 const dataDir = path.join(root, "data");
 const uploadDir = path.join(root, "uploads");
 const dbPath = path.join(dataDir, "db.json");
+const gasToolUsersPath = path.join(root, "gas-sync-tool", "data", "gas-users.json");
 const port = Number(process.env.PORT || 9000);
 const sessionMaxAge = 1000 * 60 * 60 * 24 * 7;
 const passwordIterations = 120000;
 const gasSeedUsers = [
   { uid: "5194", nickname: "Fer叶枫" }
 ];
+const ipLocationOverrides = {
+  "223.160.116.23": "湖北"
+};
+let gasToolUsersCache = { mtimeMs: 0, users: [] };
 
 fs.mkdirSync(dataDir, { recursive: true });
 fs.mkdirSync(uploadDir, { recursive: true });
@@ -42,11 +47,32 @@ function readDb() {
   db.sessions ||= {};
   db.submissions ||= [];
   db.gasUsers ||= [];
+  db.ipLocations ||= {};
+  db.incidents.forEach((incident) => {
+    incident.comments = Array.isArray(incident.comments) ? incident.comments : [];
+    incident.likedBy = Array.isArray(incident.likedBy) ? incident.likedBy : [];
+  });
   return db;
 }
 
 function writeDb(db) {
   fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
+}
+
+function readGasToolUsers() {
+  try {
+    if (!fs.existsSync(gasToolUsersPath)) return [];
+    const stat = fs.statSync(gasToolUsersPath);
+    if (stat.mtimeMs === gasToolUsersCache.mtimeMs) return gasToolUsersCache.users;
+    const parsed = JSON.parse(fs.readFileSync(gasToolUsersPath, "utf8"));
+    gasToolUsersCache = {
+      mtimeMs: stat.mtimeMs,
+      users: Array.isArray(parsed) ? parsed : []
+    };
+    return gasToolUsersCache.users;
+  } catch {
+    return gasToolUsersCache.users || [];
+  }
 }
 
 function publicUser(user) {
@@ -69,6 +95,161 @@ function publicUserBrief(user) {
     avatar: user.avatar || "",
     role: user.role || "user"
   };
+}
+
+function publicComment(comment, db, viewer = null) {
+  const canViewAudit = viewer?.role === "superadmin";
+  const author = db.users.find((user) => user.qq === comment.createdBy);
+  const output = {
+    id: comment.id,
+    content: comment.content || "",
+    createdAt: comment.createdAt || "",
+    location: comment.location || comment.ipLocation || "未知地区",
+    authorName: author?.username || comment.authorName || "已登录用户",
+    authorAvatar: author?.avatar || "",
+    likeCount: Array.isArray(comment.likedBy) ? comment.likedBy.length : 0,
+    liked: !!viewer?.qq && Array.isArray(comment.likedBy) && comment.likedBy.includes(viewer.qq),
+    canDelete: !!viewer?.qq && (viewer.role === "superadmin" || comment.createdBy === viewer.qq),
+    replies: Array.isArray(comment.replies) ? comment.replies.map((reply) => publicComment(reply, db, viewer)) : []
+  };
+  if (canViewAudit) output.createdBy = comment.createdBy || "";
+  return output;
+}
+
+function publicRecord(record, db, viewer) {
+  const canViewAudit = viewer?.role === "superadmin";
+  const output = { ...record };
+  if (Array.isArray(record.likedBy)) {
+    output.likeCount = record.likedBy.length;
+    output.liked = !!viewer?.qq && record.likedBy.includes(viewer.qq);
+  }
+  if (record.title) {
+    output.canDelete = !!viewer?.qq && (isAdminRole(viewer) || record.createdBy === viewer.qq);
+  }
+  output.comments = Array.isArray(record.comments)
+    ? record.comments.map((comment) => publicComment(comment, db, viewer))
+    : [];
+  delete output.likedBy;
+  if (!canViewAudit) {
+    delete output.createdBy;
+    delete output.updatedBy;
+    delete output.approvedBy;
+    delete output.reviewedBy;
+    delete output.submitterQq;
+    delete output.history;
+  }
+  return output;
+}
+
+function publicPeople(db, viewer) {
+  return db.people.map((person) => publicRecord(person, db, viewer));
+}
+
+function publicIncidents(db, viewer) {
+  return db.incidents.map((incident) => publicRecord(incident, db, viewer));
+}
+
+function publicSubmission(submission, db, viewer) {
+  const canViewAudit = viewer?.role === "superadmin";
+  const output = { ...submission };
+  output.payload = publicRecord(submission.payload || {}, db, viewer);
+  if (!canViewAudit) {
+    delete output.submitterQq;
+    delete output.reviewedBy;
+    delete output.approvedTargetId;
+  }
+  return output;
+}
+
+function findComment(comments, id) {
+  for (const comment of comments || []) {
+    if (comment.id === id) return comment;
+    const found = findComment(comment.replies || [], id);
+    if (found) return found;
+  }
+  return null;
+}
+
+function isTopLevelComment(comments, id) {
+  return (comments || []).some((comment) => comment.id === id);
+}
+
+function removeComment(comments, id) {
+  const index = (comments || []).findIndex((comment) => comment.id === id);
+  if (index >= 0) {
+    comments.splice(index, 1);
+    return true;
+  }
+  return (comments || []).some((comment) => removeComment(comment.replies || [], id));
+}
+
+function toggleLike(list, qq) {
+  const likes = Array.isArray(list) ? list : [];
+  const index = likes.indexOf(qq);
+  if (index >= 0) {
+    likes.splice(index, 1);
+    return { likes, liked: false };
+  }
+  likes.push(qq);
+  return { likes, liked: true };
+}
+
+function requestIp(req) {
+  const forwarded = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+  const raw = forwarded || req.socket?.remoteAddress || "";
+  return raw.replace(/^::ffff:/, "") || "未知";
+}
+
+function isPrivateIp(ip) {
+  if (!ip || ip === "未知" || ip === "::1" || ip === "127.0.0.1" || ip === "localhost") return true;
+  if (/^(10|127)\./.test(ip)) return true;
+  if (/^192\.168\./.test(ip)) return true;
+  if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(ip)) return true;
+  if (/^169\.254\./.test(ip)) return true;
+  if (/^fc|^fd/i.test(ip)) return true;
+  return false;
+}
+
+async function resolveIpLocation(ip, db) {
+  if (isPrivateIp(ip)) return "本地网络";
+  db.ipLocations ||= {};
+  const cleanPart = (part) => String(part || "")
+    .trim()
+    .replace(/^(中国|中华人民共和国)$/, "")
+    .replace(/(特别行政区|自治区|维吾尔自治区|壮族自治区|回族自治区|省|市|地区|盟)$/u, "")
+    .trim();
+  const normalize = (...parts) => parts
+    .map(cleanPart)
+    .filter(Boolean)
+    .filter((part, index, arr) => index === 0 || part !== arr[index - 1])[0] || "";
+  if (db.ipLocations[ip]?.version === 4 && db.ipLocations[ip]?.location && db.ipLocations[ip].location !== "未知地区") {
+    db.ipLocations[ip].location = normalize(...String(db.ipLocations[ip].location).split(/\s+/));
+    return db.ipLocations[ip].location;
+  }
+  let location = "";
+  const ip138 = await fetchText(`https://www.ip138.com/iplookup.php?ip=${encodeURIComponent(ip)}&action=2`, {
+    Referer: "https://www.ip138.com/"
+  }).catch(() => "");
+  const ip138Text = ip138.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+  const ip138Match = ip138Text.match(/ASN归属地\s*中国\s*([^\s]+)(?:\s+([^\s]+))?/u)
+    || ip138Text.match(/归属地\s*中国\s*([^\s]+)(?:\s+([^\s]+))?/u);
+  if (ip138Match) location = normalize(ip138Match[1], ip138Match[2]);
+  if (!location && ipLocationOverrides[ip]) location = ipLocationOverrides[ip];
+  if (!location) {
+    const pconline = await fetchGbkJson(`https://whois.pconline.com.cn/ipJson.jsp?json=true&ip=${encodeURIComponent(ip)}`).catch(() => null);
+    location = normalize(pconline?.pro, pconline?.city);
+  }
+  if (!location) {
+    const ipwho = await fetchJson(`https://ipwho.is/${encodeURIComponent(ip)}?lang=zh-CN`).catch(() => null);
+    if (ipwho?.success) location = normalize(ipwho.region, ipwho.city);
+  }
+  if (!location) {
+    const payload = await fetchJson(`http://ip-api.com/json/${encodeURIComponent(ip)}?lang=zh-CN&fields=status,regionName,city`).catch(() => null);
+    if (payload?.status === "success") location = normalize(payload.regionName, payload.city);
+  }
+  if (!location) return "未知地区";
+  db.ipLocations[ip] = { location, version: 4, updatedAt: new Date().toISOString() };
+  return location;
 }
 
 function isAdminRole(user) {
@@ -234,6 +415,31 @@ async function fetchJson(url, headers = {}) {
   return response.json().catch(() => null);
 }
 
+async function fetchText(url, headers = {}) {
+  const response = await fetch(url, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 DLRS-Personas/1.0",
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      ...headers
+    }
+  });
+  if (!response.ok) return "";
+  return response.text();
+}
+
+async function fetchGbkJson(url, headers = {}) {
+  const response = await fetch(url, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 DLRS-Personas/1.0",
+      "Accept": "application/json,text/plain,*/*",
+      ...headers
+    }
+  });
+  if (!response.ok) return null;
+  const text = new TextDecoder("gb18030").decode(Buffer.from(await response.arrayBuffer()));
+  return JSON.parse(text);
+}
+
 function gasUserFromSpace(uid, payload) {
   const data = payload?.data || {};
   const nickname = String(data.nickname || data.name || "").trim();
@@ -276,7 +482,7 @@ function mergeGasUserCache(db, user) {
 
 function cachedGasMatches(db, keyword) {
   const q = normalizeGasKeyword(keyword);
-  const pool = [...(db.gasUsers || []), ...gasSeedUsers];
+  const pool = [...(db.gasUsers || []), ...readGasToolUsers(), ...gasSeedUsers];
   const seen = new Set();
   return pool.filter((item) => {
     const uid = String(item.uid || "");
@@ -434,12 +640,14 @@ async function normalizeIncident(input, existing = {}) {
     viewCount: Number.isFinite(Number(input.viewCount ?? existing.viewCount))
       ? Math.max(0, Number(input.viewCount ?? existing.viewCount))
       : 0,
+    likedBy: Array.isArray(existing.likedBy) ? existing.likedBy : (Array.isArray(input.likedBy) ? input.likedBy : []),
     credibility: input.credibility || existing.credibility || "unverified",
     createdAt: existing.createdAt || input.createdAt || now,
     updatedAt: now,
     createdBy: existing.createdBy || input.createdBy || "",
     updatedBy: existing.updatedBy || input.updatedBy || "",
-    history: Array.isArray(existing.history) ? existing.history : (Array.isArray(input.history) ? input.history : [])
+    history: Array.isArray(existing.history) ? existing.history : (Array.isArray(input.history) ? input.history : []),
+    comments: Array.isArray(existing.comments) ? existing.comments : (Array.isArray(input.comments) ? input.comments : [])
   };
 }
 
@@ -495,7 +703,12 @@ async function handleApi(req, res) {
     const me = getSessionUser(req, db);
     if (me === null) dirtySession = true;
     if (dirtySession) writeDb(db);
-    return sendJson(res, 200, { people: db.people, incidents: db.incidents, users: db.users.map(publicUserBrief), me: publicUser(me) });
+    return sendJson(res, 200, {
+      people: publicPeople(db, me),
+      incidents: publicIncidents(db, me),
+      users: db.users.map(publicUserBrief),
+      me: publicUser(me)
+    });
   }
 
   if (req.method === "GET" && url.pathname === "/api/me") {
@@ -588,7 +801,7 @@ async function handleApi(req, res) {
     if (isAdminRole(user)) {
       db.people.unshift(person);
       writeDb(db);
-      return sendJson(res, 200, { ...person, pending: false });
+      return sendJson(res, 200, { ...publicRecord(person, db, user), pending: false });
     }
     const submission = newSubmission("person", person, user);
     db.submissions.unshift(submission);
@@ -607,7 +820,7 @@ async function handleApi(req, res) {
     if (accountError) return sendJson(res, 400, { error: accountError });
     db.people[index] = stampUpdate(await normalizePerson({ ...input, id }, db.people[index]), db.people[index], user);
     writeDb(db);
-    return sendJson(res, 200, db.people[index]);
+    return sendJson(res, 200, publicRecord(db.people[index], db, user));
   }
 
   if (req.method === "DELETE" && url.pathname.startsWith("/api/people/")) {
@@ -657,7 +870,7 @@ async function handleApi(req, res) {
       person.updatedAt = new Date().toISOString();
     });
     writeDb(db);
-    return sendJson(res, 200, { ...incident, pending: false });
+    return sendJson(res, 200, { ...publicRecord(incident, db, user), pending: false });
   }
 
   if (req.method === "POST" && url.pathname.startsWith("/api/incidents/") && url.pathname.endsWith("/view")) {
@@ -668,6 +881,112 @@ async function handleApi(req, res) {
     incident.updatedAt = incident.updatedAt || new Date().toISOString();
     writeDb(db);
     return sendJson(res, 200, { ok: true, viewCount: incident.viewCount });
+  }
+
+  const incidentLikeMatch = url.pathname.match(/^\/api\/incidents\/([^/]+)\/like$/);
+  if (req.method === "POST" && incidentLikeMatch) {
+    const user = requireUser(req, res, db);
+    if (!user) return;
+    if (user.mustChangePassword) return sendJson(res, 403, { error: "请先修改初始密码" });
+    const id = decodeURIComponent(incidentLikeMatch[1]);
+    const incident = db.incidents.find((item) => item.id === id);
+    if (!incident) return sendJson(res, 404, { error: "事件不存在" });
+    const result = toggleLike(incident.likedBy, user.qq);
+    incident.likedBy = result.likes;
+    writeDb(db);
+    return sendJson(res, 200, { liked: result.liked, likeCount: incident.likedBy.length });
+  }
+
+  if (req.method === "POST" && url.pathname.startsWith("/api/incidents/") && url.pathname.endsWith("/comments")) {
+    const user = requireUser(req, res, db);
+    if (!user) return;
+    if (user.mustChangePassword) return sendJson(res, 403, { error: "请先修改初始密码" });
+    const id = decodeURIComponent(url.pathname.slice("/api/incidents/".length, -"/comments".length));
+    const incident = db.incidents.find((item) => item.id === id);
+    if (!incident) return sendJson(res, 404, { error: "事件不存在" });
+    const input = await readJson(req);
+    const content = String(input.content || "").trim();
+    if (!content) return sendJson(res, 400, { error: "评论不能为空" });
+    if (content.length > 1000) return sendJson(res, 400, { error: "评论最多 1000 字" });
+    incident.comments ||= [];
+    const ip = requestIp(req);
+    const comment = {
+      id: crypto.randomUUID(),
+      content,
+      createdBy: user.qq,
+      createdAt: new Date().toISOString(),
+      ip,
+      location: await resolveIpLocation(ip, db),
+      likedBy: [],
+      replies: []
+    };
+    incident.comments.push(comment);
+    incident.updatedAt = new Date().toISOString();
+    writeDb(db);
+    return sendJson(res, 200, { comment: publicComment(comment, db, user) });
+  }
+
+  const commentMatch = url.pathname.match(/^\/api\/incidents\/([^/]+)\/comments\/([^/]+)(?:\/(reply|like))?$/);
+  if (commentMatch && req.method === "POST") {
+    const user = requireUser(req, res, db);
+    if (!user) return;
+    if (user.mustChangePassword) return sendJson(res, 403, { error: "请先修改初始密码" });
+    const incident = db.incidents.find((item) => item.id === decodeURIComponent(commentMatch[1]));
+    if (!incident) return sendJson(res, 404, { error: "事件不存在" });
+    incident.comments ||= [];
+    const comment = findComment(incident.comments, decodeURIComponent(commentMatch[2]));
+    if (!comment) return sendJson(res, 404, { error: "评论不存在" });
+    const action = commentMatch[3] || "";
+    if (action === "like") {
+      const result = toggleLike(comment.likedBy, user.qq);
+      comment.likedBy = result.likes;
+      writeDb(db);
+      return sendJson(res, 200, { liked: result.liked, likeCount: comment.likedBy.length });
+    }
+    if (action === "reply") {
+      if (!isTopLevelComment(incident.comments, comment.id)) {
+        return sendJson(res, 400, { error: "二级评论不能继续回复" });
+      }
+      const input = await readJson(req);
+      const content = String(input.content || "").trim();
+      if (!content) return sendJson(res, 400, { error: "回复不能为空" });
+      if (content.length > 1000) return sendJson(res, 400, { error: "回复最多 1000 字" });
+      comment.replies ||= [];
+      const ip = requestIp(req);
+      const reply = {
+        id: crypto.randomUUID(),
+        content,
+        createdBy: user.qq,
+        createdAt: new Date().toISOString(),
+        ip,
+        location: await resolveIpLocation(ip, db),
+        likedBy: [],
+        replies: []
+      };
+      comment.replies.push(reply);
+      incident.updatedAt = new Date().toISOString();
+      writeDb(db);
+      return sendJson(res, 200, { reply: publicComment(reply, db, user) });
+    }
+  }
+
+  if (commentMatch && req.method === "DELETE") {
+    const user = requireUser(req, res, db);
+    if (!user) return;
+    if (user.mustChangePassword) return sendJson(res, 403, { error: "请先修改初始密码" });
+    const incident = db.incidents.find((item) => item.id === decodeURIComponent(commentMatch[1]));
+    if (!incident) return sendJson(res, 404, { error: "事件不存在" });
+    const commentId = decodeURIComponent(commentMatch[2]);
+    const comment = findComment(incident.comments || [], commentId);
+    if (!comment) return sendJson(res, 404, { error: "评论不存在" });
+    if (user.role !== "superadmin" && comment.createdBy !== user.qq) {
+      return sendJson(res, 403, { error: "只能删除自己的评论" });
+    }
+    const ok = removeComment(incident.comments || [], commentId);
+    if (!ok) return sendJson(res, 404, { error: "评论不存在" });
+    incident.updatedAt = new Date().toISOString();
+    writeDb(db);
+    return sendJson(res, 200, { ok: true });
   }
 
   if (req.method === "PUT" && url.pathname.startsWith("/api/incidents/")) {
@@ -683,27 +1002,31 @@ async function handleApi(req, res) {
       person.updatedAt = new Date().toISOString();
     });
     writeDb(db);
-    return sendJson(res, 200, db.incidents[index]);
+    return sendJson(res, 200, publicRecord(db.incidents[index], db, user));
   }
 
   if (req.method === "DELETE" && url.pathname.startsWith("/api/incidents/")) {
-    const user = requireAdmin(req, res, db);
+    const user = requireUser(req, res, db);
     if (!user) return;
+    if (user.mustChangePassword) return sendJson(res, 403, { error: "请先修改初始密码" });
     const id = decodeURIComponent(url.pathname.split("/").pop());
     const index = db.incidents.findIndex((incident) => incident.id === id);
     if (index < 0) return sendJson(res, 404, { error: "事件不存在" });
+    if (!isAdminRole(user) && db.incidents[index].createdBy !== user.qq) {
+      return sendJson(res, 403, { error: "只能删除自己发布的事件" });
+    }
     const [incident] = db.incidents.splice(index, 1);
     (incident.personIds || [incident.personId]).map((personId) => db.people.find((item) => item.id === personId)).filter(Boolean).forEach((person) => {
       person.updatedAt = new Date().toISOString();
     });
     writeDb(db);
-    return sendJson(res, 200, { ok: true, incident });
+    return sendJson(res, 200, { ok: true });
   }
 
   if (req.method === "GET" && url.pathname === "/api/admin/submissions") {
     const user = requireAdmin(req, res, db);
     if (!user) return;
-    return sendJson(res, 200, { submissions: db.submissions });
+    return sendJson(res, 200, { submissions: db.submissions.map((submission) => publicSubmission(submission, db, user)) });
   }
 
   if (req.method === "GET" && url.pathname === "/api/admin/users") {
