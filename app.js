@@ -2532,6 +2532,15 @@ function bindSettings() {
     localStorage.setItem(THEME_KEY, theme);
     applyTheme(theme);
   });
+  const petToggle = $("#petToggle");
+  if (petToggle) {
+    petToggle.checked = localStorage.getItem("dlrs-zhuzhiliao-pet-enabled") !== "0";
+    petToggle.addEventListener("change", () => {
+      const enabled = petToggle.checked;
+      localStorage.setItem("dlrs-zhuzhiliao-pet-enabled", enabled ? "1" : "0");
+      window.__zhuzhiliaoPetSet?.(enabled);
+    });
+  }
   renderAccountPanel();
 }
 
@@ -2663,14 +2672,22 @@ function bindIncidentShareButtons() {
 function bindMenu() {
   if (sessionStorage.getItem(NAV_KEY) === "1") document.body.classList.add("nav-open");
   document.documentElement.classList.remove("nav-open-initial");
+  const refreshPetAfterLayout = () => {
+    window.__zhuzhiliaoPetRefresh?.();
+    requestAnimationFrame(() => window.__zhuzhiliaoPetRefresh?.());
+    setTimeout(() => window.__zhuzhiliaoPetRefresh?.(), 80);
+    setTimeout(() => window.__zhuzhiliaoPetRefresh?.(), 220);
+  };
   $("#menuButton")?.addEventListener("click", () => {
     document.body.classList.toggle("nav-open");
     sessionStorage.setItem(NAV_KEY, document.body.classList.contains("nav-open") ? "1" : "0");
+    refreshPetAfterLayout();
   });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       document.body.classList.remove("nav-open");
       sessionStorage.setItem(NAV_KEY, "0");
+      refreshPetAfterLayout();
     }
   });
   const current = location.pathname.split("/").pop() || "index.html";
@@ -2710,6 +2727,177 @@ function bindMobileTabbar() {
   document.body.appendChild(tabbar);
 }
 
+function bindZhuzhiliaoPet() {
+  if (document.querySelector(".zhuzhiliao-pet")) return;
+  const current = location.pathname.split("/").pop() || "index.html";
+  const dock = document.querySelector("[data-zhuzhiliao-dock]");
+  if (current !== "index.html") {
+    window.__zhuzhiliaoPetSet = () => {};
+    return;
+  }
+  if (window.matchMedia("(pointer: coarse)").matches || window.matchMedia("(max-width: 768px)").matches) {
+    if (dock) dock.hidden = true;
+    window.__zhuzhiliaoPetSet = () => {};
+    return;
+  }
+
+  const PET_KEY = "dlrs-zhuzhiliao-pet-enabled";
+  const shell = document.createElement("aside");
+  shell.className = "zhuzhiliao-pet";
+  shell.innerHTML = `
+    <div class="zhuzhiliao-pet__shell">
+      <iframe class="zhuzhiliao-pet__frame" title="竹知了" src="./zzl/index.html?embed=1" allow="autoplay"></iframe>
+      <button class="zhuzhiliao-pet__hit" type="button" aria-label="拖动竹知了"></button>
+    </div>
+  `;
+  document.body.appendChild(shell);
+
+  const frame = shell.querySelector(".zhuzhiliao-pet__frame");
+  const hit = shell.querySelector(".zhuzhiliao-pet__hit");
+  const dockDot = document.querySelector(".zhuzhiliao-dock__dot");
+  const activePointers = new Map();
+  const drag = { pointerId: null, moved: false, started: false, startX: 0, startY: 0 };
+  const MOVE_THRESHOLD = 10;
+  const MOVE_THRESHOLD_SQ = MOVE_THRESHOLD * MOVE_THRESHOLD;
+  let iframeWin = null;
+
+  function petEnabled() {
+    return localStorage.getItem(PET_KEY) !== "0";
+  }
+
+  function syncVisibility() {
+    const enabled = petEnabled();
+    shell.hidden = !enabled;
+    if (dock) dock.hidden = !enabled;
+    if (shell.hidden) document.body.classList.remove("zhuzhiliao-dragging");
+  }
+
+  function dockRect() {
+    return dock?.getBoundingClientRect() || { left: window.innerWidth - 260, top: window.innerHeight - 220, width: 220, height: 160 };
+  }
+
+  function dockPoint() {
+    const rect = (dockDot || dock)?.getBoundingClientRect() || dockRect();
+    return {
+      x: rect.left + rect.width * 0.5,
+      y: rect.top + rect.height * 0.5
+    };
+  }
+
+  function syncDockHitbox() {
+    const rect = dockRect();
+    hit.style.left = `${Math.max(0, rect.left)}px`;
+    hit.style.top = `${Math.max(0, rect.top)}px`;
+    hit.style.width = `${Math.max(0, rect.width)}px`;
+    hit.style.height = `${Math.max(0, rect.height)}px`;
+  }
+
+  function refreshDock() {
+    syncDockHitbox();
+    if (petEnabled()) sendDockHome({ immediate: true });
+  }
+
+  function postPet(type, payload = {}) {
+    if (!iframeWin) return;
+    iframeWin.postMessage({ source: "dlrs-zhuzhiliao", type, ...payload }, "*");
+  }
+
+  window.__zhuzhiliaoPetSet = (enabled) => {
+    localStorage.setItem(PET_KEY, enabled ? "1" : "0");
+    syncVisibility();
+    if (enabled) refreshDock();
+  };
+  syncVisibility();
+
+  frame.addEventListener("load", () => {
+    iframeWin = frame.contentWindow;
+    refreshDock();
+  });
+
+  function sendPoint(type, e) {
+    const rect = shell.getBoundingClientRect();
+    postPet(type, {
+      pointerId: e.pointerId,
+      clientX: e.clientX - rect.left,
+      clientY: e.clientY - rect.top,
+      pointerType: e.pointerType || "mouse",
+      buttons: e.buttons || 0,
+      timeStamp: e.timeStamp || performance.now()
+    });
+  }
+
+  function sendDockHome({ immediate = false } = {}) {
+    const p = dockPoint();
+    const rect = shell.getBoundingClientRect();
+    postPet("home", {
+      clientX: p.x - rect.left,
+      clientY: p.y - rect.top,
+      immediate,
+      pointerType: "mouse"
+    });
+  }
+
+  function onPointerDown(e) {
+    if (e.button !== 0 || !petEnabled()) return;
+    if (!e.target.closest(".zhuzhiliao-pet__hit")) return;
+    e.preventDefault();
+    hit.setPointerCapture?.(e.pointerId);
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    drag.pointerId = e.pointerId;
+    drag.moved = false;
+    drag.started = false;
+    drag.startX = e.clientX;
+    drag.startY = e.clientY;
+    drag.started = true;
+    sendPoint("pointerdown", e);
+    document.body.classList.add("zhuzhiliao-dragging");
+  }
+
+  function onPointerMove(e) {
+    if (!activePointers.has(e.pointerId)) return;
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (drag.pointerId !== e.pointerId) return;
+    const dx = e.clientX - drag.startX;
+    const dy = e.clientY - drag.startY;
+    if (!drag.moved && (dx * dx + dy * dy) < MOVE_THRESHOLD_SQ) return;
+    drag.moved = true;
+    e.preventDefault();
+    sendPoint("pointermove", e);
+  }
+
+  function releasePointer(e) {
+    if (!activePointers.has(e.pointerId)) return;
+    const wasDragging = drag.pointerId === e.pointerId && drag.moved;
+    activePointers.delete(e.pointerId);
+    if (drag.pointerId === e.pointerId) {
+      if (drag.started) {
+        sendPoint("pointerup", e);
+      }
+      drag.pointerId = null;
+      drag.moved = false;
+      drag.started = false;
+      document.body.classList.remove("zhuzhiliao-dragging");
+      sendDockHome();
+      hit.releasePointerCapture?.(e.pointerId);
+    }
+  }
+
+  syncDockHitbox();
+  window.addEventListener("resize", () => {
+    refreshDock();
+  });
+  window.addEventListener("scroll", () => {
+    refreshDock();
+  }, { passive: true });
+
+  window.__zhuzhiliaoPetRefresh = refreshDock;
+
+  hit.addEventListener("pointerdown", onPointerDown, { passive: false });
+  window.addEventListener("pointermove", onPointerMove, { passive: false });
+  window.addEventListener("pointerup", releasePointer, { passive: true });
+  window.addEventListener("pointercancel", releasePointer, { passive: true });
+}
+
 async function init() {
   applyTheme(localStorage.getItem(THEME_KEY) || "dark");
   await loadServerState();
@@ -2717,6 +2905,7 @@ async function init() {
   if (!guardRestrictedPages()) return;
   bindMenu();
   bindMobileTabbar();
+  bindZhuzhiliaoPet();
   bindQqLinks();
   bindCardNavigation();
   bindUploadCards();

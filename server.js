@@ -36,7 +36,8 @@ const mimeTypes = {
   ".jpeg": "image/jpeg",
   ".webp": "image/webp",
   ".gif": "image/gif",
-  ".svg": "image/svg+xml"
+  ".svg": "image/svg+xml",
+  ".obj": "text/plain; charset=utf-8"
 };
 
 function readDb() {
